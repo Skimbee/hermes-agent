@@ -1,12 +1,9 @@
 name: Bridge independent evidence gate
 on:
-  workflow_run:
-    workflows: ['Bridge hourly integration pilot']
-    types: [completed]
   workflow_dispatch:
     inputs:
-      candidate_run:
-        description: 'Completed hourly integration run ID'
+      dashboard_run:
+        description: 'Completed isolated Dashboard E2E run ID'
         required: true
         type: string
 permissions:
@@ -25,7 +22,7 @@ jobs:
       - name: Independently verify run, artifact, controls and Dashboard
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN: ${{ github.event.workflow_run.id || inputs.candidate_run }}
+          DASHBOARD_RUN: ${{ inputs.dashboard_run }}
         run: python3 scripts/bridge/release_check.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

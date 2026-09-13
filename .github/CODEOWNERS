@@ -2,3 +2,5 @@
 # GitHub branch protection enforces approval and invalidates stale reviews.
 /.github/ @Skimbee
 /scripts/ @Skimbee
+/CODEOWNERS @Skimbee
+/docs/CODEOWNERS @Skimbee

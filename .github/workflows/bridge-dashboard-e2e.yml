@@ -1,66 +1,59 @@
-name: Bridge isolated Dashboard update E2E
+name: Bridge isolated Dashboard E2E
 on:
   workflow_dispatch:
     inputs:
       candidate_run:
-        description: 'Successful hourly integration run ID'
-        required: true
-        default: '34761194950'
         type: string
+        required: true
+  workflow_run:
+    workflows: ['Bridge hourly integration pilot']
+    types: [completed]
 permissions:
   contents: read
   actions: read
+concurrency:
+  group: container-dashboard-e2e
+  cancel-in-progress: false
 jobs:
   dashboard:
-    if: github.repository == 'Skimbee/hermes-agent'
+    if: github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 26
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-      - name: Obtain previously tested candidate
+      - name: Verify local contracts and prepare authenticated candidate
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_RUN: ${{ github.event.workflow_run.id || inputs.candidate_run }}
         run: |
-          set -euo pipefail
-          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
-          attempt=$(gh api "repos/Skimbee/hermes-agent/actions/runs/$CANDIDATE_RUN" --jq .run_attempt)
-          gh run download "$CANDIDATE_RUN" --repo Skimbee/hermes-agent --name "bridge-candidate-$CANDIDATE_RUN-$attempt" --dir input
-      - name: Prepare disposable installation
-        shell: bash
+          python3 -m unittest discover -s scripts/bridge -p 'test_*.py' -v
+          python3 scripts/bridge/container-e2e/prepare.py
+      - name: Build trusted toolchain without candidate sources
+        if: steps.prepare.outputs.no_change != 'true'
+        run: docker build --tag bridge-e2e-toolchain:local scripts/bridge/container-e2e
+      - name: Install trusted external browser controller
+        if: steps.prepare.outputs.no_change != 'true'
         run: |
-          set -euo pipefail
-          git clone --no-checkout https://github.com/Skimbee/hermes-agent.git source
-          git -C source bundle verify ../input/candidate.bundle
-          git -C source fetch ../input/candidate.bundle HEAD
-          target=$(python3 -c 'import json,re; r=json.load(open("input/receipt.json")); assert re.fullmatch("[0-9a-f]{40}",r["candidate"]); print(r["candidate"])')
-          test "$(git -C source rev-parse FETCH_HEAD)" = "$target"
-          git clone --bare source fixture-origin.git
-          git --git-dir=fixture-origin.git update-ref refs/heads/main d131988d53c3b8389801f6cee03b990bd51ac49a
-          git --git-dir=fixture-origin.git symbolic-ref HEAD refs/heads/main
-          git clone fixture-origin.git client
-          git --git-dir=fixture-origin.git update-ref refs/heads/main "$target"
-          cd client
-          uv sync --frozen --python 3.11 --extra web --extra hindsight
-          npm ci
-          npm run build --workspace web
-          cd ..
-          uv venv controller
-          uv pip install --python controller/bin/python playwright==1.55.0
-          controller/bin/python -m playwright install --with-deps chromium
-      - name: Exercise real Dashboard browser update
-        run: controller/bin/python scripts/bridge/dashboard_e2e.py
-      - name: Upload bounded E2E evidence
+          python3 -m venv controller-env
+          controller-env/bin/pip install playwright==1.55.0
+          controller-env/bin/python -m playwright install --with-deps chromium
+      - name: Real browser update with external offline snapshot inspection
+        if: steps.prepare.outputs.no_change != 'true'
+        run: controller-env/bin/python scripts/bridge/container-e2e/controller.py
+      - name: Preserve external result and bounded diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: dashboard-e2e-${{ github.run_id }}
-          path: evidence/
-          if-no-files-found: warn
+          name: container-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/result.json
+            evidence/install-diagnostic.txt
+            evidence/dashboard-diagnostic.txt
+            e2e-input/binding.json
+            e2e-input/original-receipt.json
           retention-days: 7
+          if-no-files-found: warn

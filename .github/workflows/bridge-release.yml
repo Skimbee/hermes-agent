@@ -1,0 +1,126 @@
+name: Bridge verified release
+on:
+  workflow_run:
+    workflows: ['Bridge isolated Dashboard E2E']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dashboard_run:
+        description: 'Completed Dashboard E2E run ID on current main'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+concurrency:
+  group: bridge-release-main
+  cancel-in-progress: false
+jobs:
+  verify:
+    outputs:
+      publishable: ${{ steps.verify.outputs.publishable }}
+    if: github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: verify exact candidate
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DASHBOARD_RUN: ${{ github.event.workflow_run.id || inputs.dashboard_run }}
+        run: python3 scripts/bridge/release_v2.py verify --dashboard-run "$DASHBOARD_RUN"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bridge-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: proof.json
+          if-no-files-found: error
+          retention-days: 7
+  stage:
+    needs: [verify]
+    if: needs.verify.outputs.publishable == 'true' && github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-agent
+          skip-token-revoke: false
+          permission-contents: write
+          permission-pull-requests: write
+      - name: stage exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 scripts/bridge/release_v2.py stage
+  attest:
+    needs: [verify, stage]
+    if: needs.verify.outputs.publishable == 'true' && github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-agent
+          skip-token-revoke: false
+          permission-checks: write
+      - name: attest exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 scripts/bridge/release_v2.py attest
+  publish:
+    needs: [verify, stage, attest]
+    if: needs.verify.outputs.publishable == 'true' && github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') && vars.BRIDGE_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-agent
+          skip-token-revoke: false
+          permission-contents: write
+      - name: publish exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          BRIDGE_RELEASE_ENABLED: ${{ vars.BRIDGE_RELEASE_ENABLED }}
+        run: python3 scripts/bridge/release_v2.py publish
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bridge-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: publication.json
+          if-no-files-found: error
+          retention-days: 7
