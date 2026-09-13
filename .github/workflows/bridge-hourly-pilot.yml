@@ -1,0 +1,75 @@
+name: Bridge hourly integration pilot
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bridge-hourly-pilot
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'Skimbee/hermes-agent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Build isolated candidate without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/Skimbee/hermes-agent.git candidate
+          cd candidate
+          git config user.name 'Bridge integration pilot'
+          git config user.email 'hermes-agent@users.noreply.github.com'
+          git checkout --detach 2f542d949e5729586c6163d027d54c8931fd7cf6
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch upstream main
+          printf '### Read-only integration pilot\n\nBase: `%s`\n\nUpstream: `%s`\n' "$(git rev-parse HEAD)" "$(git rev-parse upstream/main)" >> "$GITHUB_STEP_SUMMARY"
+          git merge --no-edit upstream/main
+          printf '\nCandidate: `%s`\n' "$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install and verify frozen SDK contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install uv==0.11.26
+          cd candidate
+          uv lock --check
+          uv sync --frozen --extra hindsight --extra dev
+          uv pip install --python .venv/bin/python pytest-asyncio==1.3.0
+          .venv/bin/python -c 'from importlib.metadata import version; assert version("hindsight-client") == "0.9.2"'
+      - name: Run focused regression gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          bash scripts/run_tests.sh tests/plugins/memory/test_hindsight_pin_contract.py tests/plugins/memory/test_hindsight_provider.py tests/test_packaging_metadata.py tests/tools/test_lazy_deps.py tests/tools/test_lazy_deps_managed.py tests/tools/test_lazy_deps_durable_target.py tests/hermes_cli/test_update_upstream_prompt_noninteractive.py
+      - name: State pilot boundary
+        if: always()
+        run: |
+          printf '\nPilot only: no branch publication, no production changes, no Hindsight records. Native Dashboard E2E is a separate gate.\n' >> "$GITHUB_STEP_SUMMARY"
+  notify:
+    needs: verify
+    if: always() && needs.verify.result == 'failure' && github.repository == 'Skimbee/hermes-agent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update one failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: Skimbee/hermes-agent
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='Bridge hourly pilot: integration needs attention'
+          number=$(gh issue list --state open --search "$title in:title" --json number,title --jq '.[] | select(.title == "Bridge hourly pilot: integration needs attention") | .number' | sort -n | head -n 1)
+          body="Hourly read-only integration failed. No release branch was updated. Inspect: $RUN_URL"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
