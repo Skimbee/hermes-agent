@@ -29,7 +29,8 @@ for mode in ['verify','stage','attest','publish']:
         if mode=='attest':assert apps[0].get('permission-checks')=='write' and 'permission-contents' not in apps[0]
         else:assert apps[0].get('permission-contents')=='write' and 'permission-checks' not in apps[0]
 assert "vars.BRIDGE_RELEASE_ENABLED == 'true'" in release['jobs']['publish']['if']
-assert workflows['bridge-hourly-pilot.yml']['on']['schedule']==[{'cron':'17 * * * *'}]
+assert 'schedule' not in workflows['bridge-hourly-pilot.yml']['on']
+assert workflows['bridge-hourly-pilot.yml']['on']['workflow_dispatch']['inputs']['rehearsal']['default']=='normal'
 assert workflows['bridge-hourly-pilot.yml']['permissions']=={'contents':'read'}
 for file in (root/'scripts/bridge').rglob('*.py'):ast.parse(file.read_text(),filename=str(file))
 print('WORKFLOW_CONTRACT_VALIDATED',len(workflows))

@@ -1,7 +1,6 @@
 name: Bridge hourly integration pilot
 on:
-  schedule:
-    - cron: '17 * * * *'
+  # Hourly triggering is owned by the external scheduler.
   workflow_dispatch:
     inputs:
       rehearsal:
