@@ -77,8 +77,8 @@ def _maybe_upgrade_client() -> None:
         if Version(installed) < Version(_MIN_CLIENT_VERSION):
             logger.warning("hindsight-client %s is outdated (need >=%s), attempting upgrade...",
                            installed, _MIN_CLIENT_VERSION)
-            from tools.lazy_deps import install_specs
-            outcome = install_specs([f"hindsight-client>={_MIN_CLIENT_VERSION}"], timeout=120)
+            from tools.lazy_deps import LAZY_DEPS, install_specs
+            outcome = install_specs(list(LAZY_DEPS["memory.hindsight"]), timeout=120)
             if outcome.ok:
                 logger.info("hindsight-client upgraded to >=%s", _MIN_CLIENT_VERSION)
             elif outcome.blocked:

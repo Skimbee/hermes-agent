@@ -1645,7 +1645,8 @@ class TestClientAutoUpgradeRoutesThroughLazyDeps:
         calls = self._init_with_outdated_client(
             tmp_path, monkeypatch, InstallSpecsResult(ok=True)
         )
-        assert calls == [(f"hindsight-client>={_MIN_CLIENT_VERSION}",)]
+        from tools.lazy_deps import LAZY_DEPS
+        assert calls == [LAZY_DEPS["memory.hindsight"]]
 
     def test_blocked_upgrade_is_nonfatal_and_surfaces_reason(
         self, tmp_path, monkeypatch, caplog
