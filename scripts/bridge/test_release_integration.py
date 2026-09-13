@@ -69,6 +69,10 @@ class ReleaseIntegrationTests(unittest.TestCase):
         state,_=self.exercise(mode='attest');self.assertEqual([x[0] for x in state['writes']],['check-runs'])
     def test_existing_stage_is_idempotent_no_write(self):
         state,_=self.exercise(mode='stage');self.assertEqual(state['writes'],[])
+    def test_failed_jobs_rerun_requires_fresh_dispatch(self):
+        with patch.object(m,'api',return_value={'total_count':1,'jobs':[{'name':'stage','status':'completed','conclusion':'failure'}]}),self.assertRaisesRegex(ValueError,'fresh workflow_dispatch'):
+            m.completed_job({'id':44,'run_attempt':2},'verify')
+        self.assertEqual(m.restart_command(22),'gh workflow run bridge-release.yml --repo Skimbee/hermes-agent --ref main -f dashboard_run=22')
     def test_nonmain_controller_rejected_before_api(self):
         with patch.dict(os.environ,{'GITHUB_REPOSITORY':m.REPO,'GITHUB_REF':'refs/heads/unreviewed'}),patch.object(m,'api') as api,self.assertRaises(ValueError):m.run_context()
         api.assert_not_called()

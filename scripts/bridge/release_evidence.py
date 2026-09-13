@@ -73,6 +73,11 @@ def artifact(run,name):
 
 def canonical_hash(data):return hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
+def verify_first_parent(base,candidate,git):
+    sha(base);sha(candidate)
+    chain=git('rev-list','--first-parent',candidate).decode('ascii').splitlines()
+    require(chain and chain[0]==candidate and base in chain,'Base absent from actual first-parent chain')
+
 def verify(dashboard_id,workdir):
     require(type(dashboard_id) is int and dashboard_id>0,'Dashboard ID')
     base=api('git/ref/heads/main')['object']['sha']
@@ -110,7 +115,7 @@ def verify(dashboard_id,workdir):
     require(git('rev-parse','FETCH_HEAD').decode().strip()==r['candidate'],'Bundle head')
     parents=git('show','-s','--format=%P',r['candidate']).decode().split()
     require(parents, 'Candidate has no parents')
-    git('merge-base','--is-ancestor',base,parents[0])
+    verify_first_parent(base,r['candidate'],git)
     validate_candidate(base,base,r['candidate'],parents,first_parent_contains_base=True)
     for ancestor in (base,r['upstream']):git('merge-base','--is-ancestor',ancestor,r['candidate'])
     paths=[p.decode('utf-8') for p in git('diff','--no-renames','--name-only','-z',base,r['candidate']).split(b'\0') if p]

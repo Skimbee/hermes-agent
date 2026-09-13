@@ -13,11 +13,15 @@ def run_context():
     require(api('actions/workflows/'+str(run['workflow_id']))['path']==WORKFLOW,'Release workflow ID')
     return run
 
+def restart_command(dashboard_id):
+    require(type(dashboard_id) is int and dashboard_id>0,'Dashboard ID')
+    return 'gh workflow run bridge-release.yml --repo '+REPO+' --ref main -f dashboard_run='+str(dashboard_id)
+
 def completed_job(run,name):
     listing=api(f'actions/runs/{run["id"]}/attempts/{run["run_attempt"]}/jobs?per_page=100')
     require(listing['total_count']==len(listing['jobs']) and listing['total_count']<100,'Job pagination')
     jobs=[j for j in listing['jobs'] if j['name']==name]
-    require(len(jobs)==1 and jobs[0]['status']=='completed' and jobs[0]['conclusion']=='success','Missing completed trusted job: '+name)
+    require(len(jobs)==1 and jobs[0]['status']=='completed' and jobs[0]['conclusion']=='success','Missing completed trusted job: '+name+'. Start a fresh workflow_dispatch (all jobs), never Re-run failed jobs; keep the original dashboard_run only while main is unchanged.')
 
 def source_proof(run):
     completed_job(run,'verify')
@@ -68,7 +72,7 @@ def main():
                 require(refs[0]['ref']=='refs/heads/'+branch and refs[0]['object']['sha']==proof['candidate'],'Existing branch differs')
             else:
                 workflow_changes=[p for p in proof['protected_paths'] if p.startswith('.github/workflows/')]
-                require(not workflow_changes,'MANUAL_WORKFLOW_BRANCH_UPLOAD_REQUIRED: App has deliberately no Workflows write permission. Upload the verified bundle to '+branch+' using the authorized owner path; main stays unchanged.')
+                require(not workflow_changes,'MANUAL_WORKFLOW_BRANCH_UPLOAD_REQUIRED: App has deliberately no Workflows write permission. Upload the verified bundle to '+branch+' using the authorized owner path; main stays unchanged. Then start ALL jobs with: '+restart_command(proof['dashboard_run']['id']))
                 env=os.environ.copy()
                 env.update({'GIT_CONFIG_COUNT':'3','GIT_CONFIG_KEY_0':'http.https://github.com/.extraheader','GIT_CONFIG_VALUE_0':'AUTHORIZATION: basic '+base64.b64encode(('x-access-token:'+os.environ['APP_TOKEN']).encode()).decode(),'GIT_CONFIG_KEY_1':'core.hooksPath','GIT_CONFIG_VALUE_1':'/dev/null','GIT_CONFIG_KEY_2':'credential.helper','GIT_CONFIG_VALUE_2':''})
                 subprocess.run(['git','--git-dir='+str(repo),'push','https://github.com/'+REPO+'.git',proof['candidate']+':refs/heads/'+branch],env=env,check=True,timeout=180)
@@ -88,7 +92,7 @@ def main():
         reviews=api('pulls/'+str(pr['number'])+'/reviews?per_page=100');require(len(reviews)<100,'Review pagination')
         if proof['protected_paths'] and not owner_approved(reviews,proof['candidate']):
             pathlib.Path('publication.json').write_text(json.dumps({'exact_sha_published':False,'state':'waiting_owner_review','candidate':proof['candidate'],'pr':pr['number']},indent=2))
-            print('WAITING_FOR_EXACT_HEAD_OWNER_REVIEW',pr['html_url']);return
+            print('WAITING_FOR_EXACT_HEAD_OWNER_REVIEW',pr['html_url'],'After approval and while main is unchanged:',restart_command(proof['dashboard_run']['id']));return
         all_checks=api('commits/'+proof['candidate']+'/check-runs?filter=latest&per_page=100')
         require(all_checks['total_count']<100,'Check pagination')
         checks=[c for c in all_checks['check_runs'] if c['name']==CHECK and c['app']['id']==APP_ID]
