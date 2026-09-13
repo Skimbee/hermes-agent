@@ -1,0 +1,54 @@
+name: Bridge isolated Dashboard update E2E
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  dashboard:
+    if: github.repository == 'Skimbee/hermes-agent'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - name: Obtain previously tested candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 34761194950 --repo Skimbee/hermes-agent --name bridge-candidate-34761194950-1 --dir input
+      - name: Prepare disposable installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/Skimbee/hermes-agent.git source
+          git -C source bundle verify ../input/candidate.bundle
+          git -C source fetch ../input/candidate.bundle HEAD
+          test "$(git -C source rev-parse FETCH_HEAD)" = 45c0e917d3b365a58a59491ac774c78f1102c4d1
+          git clone --bare source fixture-origin.git
+          git --git-dir=fixture-origin.git update-ref refs/heads/main d131988d53c3b8389801f6cee03b990bd51ac49a
+          git --git-dir=fixture-origin.git symbolic-ref HEAD refs/heads/main
+          git clone fixture-origin.git client
+          git --git-dir=fixture-origin.git update-ref refs/heads/main 45c0e917d3b365a58a59491ac774c78f1102c4d1
+          cd client
+          uv sync --frozen --python 3.11 --extra web --extra hindsight
+          npm ci
+          npm run build --workspace web
+          cd ..
+          uv venv controller
+          uv pip install --python controller/bin/python playwright==1.55.0
+          controller/bin/python -m playwright install --with-deps chromium
+      - name: Exercise real Dashboard browser update
+        run: controller/bin/python scripts/bridge/dashboard_e2e.py
+      - name: Upload bounded E2E evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dashboard-e2e-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 7
