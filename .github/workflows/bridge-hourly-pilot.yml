@@ -3,6 +3,15 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+    inputs:
+      rehearsal:
+        description: 'Controlled failure rehearsal (normal for routine runs)'
+        type: choice
+        default: normal
+        options:
+          - normal
+          - merge-conflict
+          - test-failure
 permissions:
   contents: read
 concurrency:
@@ -14,6 +23,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
+      - name: Exercise real merge conflict in disposable repository
+        if: inputs.rehearsal == 'merge-conflict'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir conflict-fixture
+          cd conflict-fixture
+          git init -b base
+          git config user.name 'Bridge rehearsal'
+          git config user.email 'hermes-agent@users.noreply.github.com'
+          printf 'base\n' > conflict.txt
+          git add conflict.txt
+          git commit -m base
+          git checkout -b incoming
+          printf 'upstream\n' > conflict.txt
+          git commit -am incoming
+          git checkout base
+          printf 'local\n' > conflict.txt
+          git commit -am local
+          git merge incoming
       - name: Build isolated candidate without credentials
         shell: bash
         run: |
@@ -44,6 +73,9 @@ jobs:
           set -euo pipefail
           cd candidate
           bash scripts/run_tests.sh tests/plugins/memory/test_hindsight_pin_contract.py tests/plugins/memory/test_hindsight_provider.py tests/test_packaging_metadata.py tests/tools/test_lazy_deps.py tests/tools/test_lazy_deps_managed.py tests/tools/test_lazy_deps_durable_target.py tests/hermes_cli/test_update_upstream_prompt_noninteractive.py
+      - name: Exercise failing assertion
+        if: inputs.rehearsal == 'test-failure'
+        run: python3 -c 'assert False, "Intentional failure rehearsal; no publication allowed"'
       - name: State pilot boundary
         if: always()
         run: |
