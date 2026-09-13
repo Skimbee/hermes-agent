@@ -1,0 +1,4 @@
+# Controller and release-policy changes require owner review.
+# GitHub branch protection enforces approval and invalidates stale reviews.
+/.github/ @Skimbee
+/scripts/ @Skimbee
