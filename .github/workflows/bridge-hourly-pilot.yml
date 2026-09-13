@@ -51,7 +51,9 @@ jobs:
           cd candidate
           git config user.name 'Bridge integration pilot'
           git config user.email 'hermes-agent@users.noreply.github.com'
-          git checkout --detach 2f542d949e5729586c6163d027d54c8931fd7cf6
+          git checkout --detach "$GITHUB_SHA"
+          printf '%s\n' "$GITHUB_SHA" > ../candidate-base.txt
+          git merge --no-edit 2f542d949e5729586c6163d027d54c8931fd7cf6
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
           git fetch upstream main
           printf '### Read-only integration pilot\n\nBase: `%s`\n\nUpstream: `%s`\n' "$(git rev-parse HEAD)" "$(git rev-parse upstream/main)" >> "$GITHUB_STEP_SUMMARY"
@@ -76,6 +78,38 @@ jobs:
       - name: Exercise failing assertion
         if: inputs.rehearsal == 'test-failure'
         run: python3 -c 'assert False, "Intentional failure rehearsal; no publication allowed"'
+      - name: Preserve exact tested candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          cd candidate
+          base=$(cat ../candidate-base.txt)
+          git diff --exit-code HEAD
+          git merge-base --is-ancestor "$base" HEAD
+          git bundle create ../evidence/candidate.bundle "$base"..HEAD
+          git bundle verify ../evidence/candidate.bundle
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          base = pathlib.Path('../candidate-base.txt').read_text().strip()
+          changed = git('diff', '--name-only', base, 'HEAD').splitlines()
+          controls = [p for p in changed if p.startswith(('.github/', 'scripts/'))]
+          receipt = dict(schema=1, base=base, candidate=git('rev-parse','HEAD'),
+              upstream=git('rev-parse','upstream/main'), run_id=os.environ['GITHUB_RUN_ID'],
+              run_attempt=os.environ['GITHUB_RUN_ATTEMPT'], workflow_sha=os.environ['GITHUB_SHA'],
+              bundle_sha256=hashlib.sha256(pathlib.Path('../evidence/candidate.bundle').read_bytes()).hexdigest(),
+              control_changes=controls, publication_enabled=False, dashboard_e2e=False)
+          pathlib.Path('../evidence/receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
+          PY
+      - name: Upload candidate and receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bridge-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
       - name: State pilot boundary
         if: always()
         run: |
