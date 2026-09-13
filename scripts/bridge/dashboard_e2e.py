@@ -40,19 +40,20 @@ try:
             page.get_by_role('button',name='Update now',exact=True).last.click()
         assert response.value.ok, 'Update POST rejected'
         result['post_accepted']=True
-        deadline=time.monotonic()+1200
+        deadline=time.monotonic()+600
         receipt=None
         while time.monotonic()<deadline:
             try:
                 page.goto(url,wait_until='domcontentloaded',timeout=10000)
                 data=page.evaluate("""async () => { const r=await fetch('/api/hermes/update/receipt',{headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__}}); return r.ok ? await r.json() : null; }""")
+                result['receipt_http_status']=page.evaluate("""async () => (await fetch('/api/hermes/update/receipt',{headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__}})).status""")
                 if data:
                     summary=data.get('summary') or {}
                     result['receipt_summary']=summary
                     if summary.get('finished_at'):
                         receipt=summary; break
-            except Exception:
-                pass
+            except Exception as exc:
+                result['last_poll_error']=type(exc).__name__
             time.sleep(5)
         assert receipt is not None, 'No final receipt'
         assert receipt['post_sha']==target, receipt
@@ -64,6 +65,21 @@ try:
         result.update(passed=True,post_head=head(),reconnected=True)
         browser.close()
 finally:
+    result['final_head']=head()
+    result['initial_process_returncode']=server.poll()
+    import re
+    for f in (state/'logs').glob('*.log'):
+        if 'update' in f.name:
+            text=f.read_text(errors='replace')[-100000:]
+            text=re.sub(r'(?im)^.*(?:token|password|secret|api.key).*$','[REDACTED]',text)
+            (evidence/f.name).write_text(text)
+    receipts=[]
+    for f in (state/'logs/update_receipts').glob('*.json'):
+        try:
+            r=json.loads(f.read_text())
+            receipts.append({k:r.get(k) for k in ('outcome','finished_at','pre_update','post_update','exit_code')})
+        except (ValueError,OSError): pass
+    result['local_receipts']=receipts
     (evidence/'result.json').write_text(json.dumps(result,indent=2)+'\n')
     if server.poll() is None: server.terminate()
     log.close()
