@@ -1,6 +1,12 @@
 name: Bridge isolated Dashboard update E2E
 on:
   workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: 'Successful hourly integration run ID'
+        required: true
+        default: '34761194950'
+        type: string
 permissions:
   contents: read
   actions: read
@@ -20,7 +26,12 @@ jobs:
       - name: Obtain previously tested candidate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download 34761194950 --repo Skimbee/hermes-agent --name bridge-candidate-34761194950-1 --dir input
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN" =~ ^[0-9]+$ ]]
+          attempt=$(gh api "repos/Skimbee/hermes-agent/actions/runs/$CANDIDATE_RUN" --jq .run_attempt)
+          gh run download "$CANDIDATE_RUN" --repo Skimbee/hermes-agent --name "bridge-candidate-$CANDIDATE_RUN-$attempt" --dir input
       - name: Prepare disposable installation
         shell: bash
         run: |
@@ -28,12 +39,13 @@ jobs:
           git clone --no-checkout https://github.com/Skimbee/hermes-agent.git source
           git -C source bundle verify ../input/candidate.bundle
           git -C source fetch ../input/candidate.bundle HEAD
-          test "$(git -C source rev-parse FETCH_HEAD)" = 45c0e917d3b365a58a59491ac774c78f1102c4d1
+          target=$(python3 -c 'import json,re; r=json.load(open("input/receipt.json")); assert re.fullmatch("[0-9a-f]{40}",r["candidate"]); print(r["candidate"])')
+          test "$(git -C source rev-parse FETCH_HEAD)" = "$target"
           git clone --bare source fixture-origin.git
           git --git-dir=fixture-origin.git update-ref refs/heads/main d131988d53c3b8389801f6cee03b990bd51ac49a
           git --git-dir=fixture-origin.git symbolic-ref HEAD refs/heads/main
           git clone fixture-origin.git client
-          git --git-dir=fixture-origin.git update-ref refs/heads/main 45c0e917d3b365a58a59491ac774c78f1102c4d1
+          git --git-dir=fixture-origin.git update-ref refs/heads/main "$target"
           cd client
           uv sync --frozen --python 3.11 --extra web --extra hindsight
           npm ci

@@ -13,7 +13,7 @@ env={k:os.environ[k] for k in ('PATH','LANG','LC_ALL','SSL_CERT_FILE') if k in o
 env.update(HOME=str(home),HERMES_HOME=str(state),XDG_CONFIG_HOME=str(home/'config'),XDG_CACHE_HOME=str(home/'cache'),HERMES_NONINTERACTIVE='1')
 env['PATH']=str(client/'.venv/bin')+':'+env['PATH']
 base='d131988d53c3b8389801f6cee03b990bd51ac49a'
-target='45c0e917d3b365a58a59491ac774c78f1102c4d1'
+target=json.loads((root/'input/receipt.json').read_text())['candidate']
 def head():
     return subprocess.check_output(['git','-C',str(client),'rev-parse','HEAD'],text=True).strip()
 assert head()==base
