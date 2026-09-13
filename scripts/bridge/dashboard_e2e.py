@@ -18,7 +18,16 @@ def head():
     return subprocess.check_output(['git','-C',str(client),'rev-parse','HEAD'],text=True).strip()
 assert head()==base
 log=open(evidence/'dashboard.log','w')
-server=subprocess.Popen([str(client/'.venv/bin/python'),'-m','hermes_cli.main','dashboard','--host','127.0.0.1','--port','19119','--no-open','--isolated','--skip-build'],cwd=client,env=env,stdout=log,stderr=subprocess.STDOUT)
+# A standalone scope prevents the updater from attributing this manually
+# launched Dashboard to the enclosing hosted-compute-agent.service.
+import pwd
+user=pwd.getpwuid(os.getuid()).pw_name
+command=['sudo','systemd-run','--scope','--unit=bridge-dashboard-e2e','--',
+         '/usr/sbin/runuser','-u',user,'--','env','-i',
+         *[f'{k}={v}' for k,v in env.items()],
+         str(client/'.venv/bin/python'),'-m','hermes_cli.main','dashboard',
+         '--host','127.0.0.1','--port','19119','--no-open','--isolated','--skip-build']
+server=subprocess.Popen(command,cwd=client,env=env,stdout=log,stderr=subprocess.STDOUT)
 url='http://127.0.0.1:19119/system'
 result={'base':base,'target':target,'passed':False}
 try:
