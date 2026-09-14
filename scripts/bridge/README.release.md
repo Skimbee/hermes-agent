@@ -2,11 +2,13 @@
 
 ## State
 
-Implementation candidate. Publication is default-off; `BRIDGE_RELEASE_ENABLED` must be explicitly `true` before the publisher job receives a token. Landing this package does not change the production Hermes remote, client installation or Hindsight retention.
+Publication requires `BRIDGE_RELEASE_ENABLED` to be explicitly `true` before the publisher job receives a token. The current repository variable and exact-head acceptance determine live state; this document is not an activation receipt. Landing this package does not change the production Hermes remote, client installation or Hindsight retention.
 
 ## Flow
 
-`hourly candidate (17 * * * *)` → `isolated Dashboard E2E` → `bridge-release.yml`
+`external hourly workflow_dispatch` → `candidate + bounded lock metadata reconciliation` → `frozen SDK/tests` → `isolated Dashboard E2E` → `bridge-release.yml`
+
+The GitHub schedule is intentionally absent: one external scheduler owns the hourly trigger. The external scheduler never installs or publishes a candidate itself.
 
 Release jobs are separate runners:
 
@@ -18,6 +20,34 @@ Release jobs are separate runners:
 The candidate/Dashboard source workflows must be completed successfully before verification. The release workflow itself necessarily remains in progress while it publishes; trust is attached to its **already completed verifier job**, not a falsely anticipated final workflow conclusion.
 
 No-change candidate runs produce an original `no-change.json` receipt. After authenticated ancestry/identity verification, expensive E2E steps and all App jobs are skipped. No-change proofs cannot authorize publication.
+
+## Bounded lock metadata reconciliation
+
+A conflict-free Git merge can add an explicit `false` entry in
+`tool.uv.exclude-newer-package` without adding its counterpart in
+`options.exclude-newer-package` in `uv.lock`. The separate preparation step
+reconciles **only missing explicit false entries for already locked packages**.
+It does not infer exemptions, remove/change existing entries, regenerate a lock,
+resolve dependencies, install packages, or change package versions/hashes.
+
+- The helper is copied from the exact trusted `GITHUB_SHA` before the incoming
+  merge, then run with Python isolation (`-I`). Incoming helper changes are not
+  executed by the preparation step.
+- Ambiguous package aliases, changed/removed exemptions, unrecorded packages,
+  unsupported lock schemas/formatting and linked input files fail closed before
+  mutation. The complete parsed lock outside the added options must stay equal.
+- A repair is committed on the disposable candidate before `uv lock --check`,
+  frozen installation and all regression gates. The original candidate receipt
+  includes the reconciliation hashes/options and names the final tested commit.
+- A consistent lock remains byte-identical. A no-change run skips this step and
+  keeps its successful no-op receipt; a still-pending failed candidate is not a
+  no-op just because the previous hourly attempt saw the same upstream.
+- `uv lock --check`, tests, provenance checks and review policy remain mandatory.
+  Unsupported inconsistencies are real errors, not silently green results.
+
+The helper prevents this narrowly supported metadata omission from repeatedly
+blocking otherwise valid incoming candidates. It cannot guarantee that new
+upstream code or other dependency changes pass all gates.
 
 ## Review policy
 

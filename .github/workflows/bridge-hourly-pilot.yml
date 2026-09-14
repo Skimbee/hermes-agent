@@ -52,6 +52,8 @@ jobs:
           git config user.name 'Bridge integration pilot'
           git config user.email 'hermes-agent@users.noreply.github.com'
           git checkout --detach "$GITHUB_SHA"
+          # Freeze the trusted helper before merging any incoming source.
+          git show "$GITHUB_SHA:scripts/bridge/lock_metadata.py" > ../bridge-lock-metadata.py
           printf '%s\n' "$GITHUB_SHA" > ../candidate-base.txt
           git merge --no-edit 2f542d949e5729586c6163d027d54c8931fd7cf6
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
@@ -69,6 +71,21 @@ jobs:
             printf 'has_candidate=false\n' >> "$GITHUB_OUTPUT"
           else
             printf 'has_candidate=true\n' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Reconcile missing lock exclusion metadata
+        if: steps.build.outputs.has_candidate != 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I bridge-lock-metadata.py candidate > lock-metadata.json
+          cd candidate
+          if git diff --quiet --exit-code -- uv.lock; then
+            printf 'Lock exclusion metadata already consistent.\n'
+          else
+            status=$?
+            test "$status" -eq 1
+            git add -- uv.lock
+            git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m 'fix(bridge): reconcile missing lock exclusion metadata'
           fi
       - name: Install and verify frozen SDK contract
         if: steps.build.outputs.has_candidate != 'false'
@@ -114,7 +131,8 @@ jobs:
               upstream=git('rev-parse','upstream/main'), run_id=os.environ['GITHUB_RUN_ID'],
               run_attempt=os.environ['GITHUB_RUN_ATTEMPT'], workflow_sha=os.environ['GITHUB_SHA'],
               bundle_sha256=hashlib.sha256(pathlib.Path('../evidence/candidate.bundle').read_bytes()).hexdigest(),
-              control_changes=controls, publication_enabled=False, dashboard_e2e=False)
+              control_changes=controls, publication_enabled=False, dashboard_e2e=False,
+              lock_metadata_reconciliation=json.loads(pathlib.Path('../lock-metadata.json').read_text()))
           pathlib.Path('../evidence/receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
           PY
       - name: Upload candidate and receipt

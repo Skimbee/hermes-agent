@@ -32,5 +32,14 @@ assert "vars.BRIDGE_RELEASE_ENABLED == 'true'" in release['jobs']['publish']['if
 assert 'schedule' not in workflows['bridge-hourly-pilot.yml']['on']
 assert workflows['bridge-hourly-pilot.yml']['on']['workflow_dispatch']['inputs']['rehearsal']['default']=='normal'
 assert workflows['bridge-hourly-pilot.yml']['permissions']=={'contents':'read'}
+ordered_names=[step.get('name') for step in workflows['bridge-hourly-pilot.yml']['jobs']['verify']['steps']]
+sequence=('Build isolated candidate without credentials','Reconcile missing lock exclusion metadata','Install and verify frozen SDK contract','Run focused regression gates','Preserve exact tested candidate','Upload candidate and receipt')
+assert all(ordered_names.count(name)==1 for name in sequence), 'Missing or duplicated candidate step'
+positions=[ordered_names.index(name) for name in sequence]
+assert positions==sorted(positions), 'Candidate preparation, tests and evidence are out of order'
+hourly_steps={step.get('name'):step for step in workflows['bridge-hourly-pilot.yml']['jobs']['verify']['steps']}
+for name in ('Reconcile missing lock exclusion metadata','Install and verify frozen SDK contract','Run focused regression gates','Preserve exact tested candidate'):
+    assert hourly_steps[name]['if']=="steps.build.outputs.has_candidate != 'false'", 'Missing no-change guard: '+name
+    assert 'continue-on-error' not in hourly_steps[name], 'Candidate gates may not ignore failures'
 for file in (root/'scripts/bridge').rglob('*.py'):ast.parse(file.read_text(),filename=str(file))
 print('WORKFLOW_CONTRACT_VALIDATED',len(workflows))
