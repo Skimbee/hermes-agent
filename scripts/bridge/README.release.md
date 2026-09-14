@@ -75,6 +75,17 @@ Target protection: App 4931424's `Bridge release / exact-candidate`, strict chec
 
 **This repository's live rules have not been changed by the code package.** The integration rollout must separately compare the entire protection before/after and preserve everything except the explicitly intended two review settings.
 
+
+## Protection trade-off and regression contract
+
+Outside the explicit CODEOWNERS entries, detected fork control overrides are
+protected by the trusted verifier, not independently by GitHub CODEOWNERS.
+This is deliberate: upstream files must remain updatable. Ordinary upstream
+regression tests may evolve; their immutability is not promised. The fork-owned
+Hindsight pin test, bridge controller and its hard SDK check remain protected.
+Changes to those contracts require owner review. Candidate regression success
+alone is not proof that upstream code or its tests are benign.
+
 ## App permission boundary
 
 Workflow-write activation is an explicit deployment gate, **off when unset**.
@@ -114,9 +125,12 @@ Restore the prior reviewed policy through a normal protected change if needed,
 not a force-push or protection bypass. An in-flight run needs an explicit decision:
 do not revoke credentials mid-write or assume changing a variable cancels a run.
 
-Upstream workflows execute in this fork's context after adoption. Provenance is
-not a guarantee of benign upstream code; keep secrets/environment access scoped
-and include their impact in the owner activation review.
+Upstream workflows can execute already when the candidate branch is staged
+or its same-repository PR opens, BEFORE publication or owner review. Provenance
+is not a guarantee of benign code. Keep App keys in the main-only publisher
+environment, default GITHUB_TOKEN read-only, and review repository-secret
+exposure before enabling workflow writes. Adopted actions may use mutable tags;
+only our bridge workflows are SHA-pinned by the local contract checker.
 
 ## Resume after a manual gate
 
@@ -132,8 +146,8 @@ Do not choose **Re-run failed jobs**: that creates an attempt without its own co
 
 - Policy, provenance, snapshot and stateful synthetic API integration tests are not a full live fork release.
 - The existing container E2E was live verified in the separate lab. The adapted fork workflow and its complete release chain still require acceptance after the reviewed bootstrap.
-- New control files must receive human codeowner review before they become trusted main code. No further Admin exception is permitted.
-- Bootstrap requires an App-authored PR, exact-head independent evidence, owner approval and the existing App-issued required check. A regular squash/rebase/merge that changes the tested SHA is not a substitute.
+- New fork-owned or unverified control files require owner review. Exact, unchanged upstream imports follow the provenance policy above.
+- Automated releases retain their exact candidate/App evidence requirements; owner maintenance uses the separate documented PR-only route in README.maintenance.md, never a fabricated release check.
 - Candidate-controlled UI/receipt observations plus a trusted tracked-tree snapshot do not prove benign runtime code or every unversioned dependency.
 
 ## Tests

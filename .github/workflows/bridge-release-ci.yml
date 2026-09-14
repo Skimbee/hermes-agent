@@ -3,10 +3,6 @@ on:
   push:
     branches: ['bridge/release-integration']
   pull_request:
-    paths:
-      - '.github/workflows/bridge-*.yml'
-      - '.github/CODEOWNERS'
-      - 'scripts/bridge/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Offline policy, provenance, snapshot and orchestration tests
         run: python3 -m unittest discover -s scripts/bridge -p 'test_*.py' -v
