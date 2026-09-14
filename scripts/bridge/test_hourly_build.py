@@ -24,7 +24,7 @@ class HourlyBuildTests(unittest.TestCase):
         segment = workflow.split(marker, 1)[1].split('      - name:', 1)[0]
         return textwrap.dedent(segment.split('        run: |\n', 1)[1])
 
-    def build(self, changed, missing_metadata=False):
+    def build(self, changed, missing_metadata=False, verify_consumer=False):
         shell = self.shell('Build isolated candidate without credentials')
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
@@ -92,7 +92,14 @@ class HourlyBuildTests(unittest.TestCase):
                     preserved = json.loads((work / 'evidence/receipt.json').read_text())
                     self.assertEqual(preserved['candidate'], after)
                     self.assertEqual(preserved['lock_metadata_reconciliation']['added_exclusions'], ['new-package'])
-                    self.verify_dashboard_preparation(work, candidate, preserved, env)
+                    if verify_consumer:
+                        help_result = subprocess.run(['git', 'check-attr', '-h'], cwd=candidate,
+                                                     text=True, capture_output=True, timeout=10)
+                        if '--source' not in help_result.stdout + help_result.stderr:
+                            if os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted':
+                                self.fail('Trusted hosted preparation requires Git check-attr --source')
+                            self.skipTest('Hosted-controller interoperability requires --source; older sandbox Git is not its execution target')
+                        self.verify_dashboard_preparation(work, candidate, preserved, env)
                 else:
                     self.assertEqual(after, before)
 
@@ -175,6 +182,9 @@ class HourlyBuildTests(unittest.TestCase):
 
     def test_reconciliation_uses_base_helper_and_binds_committed_receipt(self):
         self.build(True, missing_metadata=True)
+
+    def test_hosted_dashboard_accepts_extended_original_receipt(self):
+        self.build(True, missing_metadata=True, verify_consumer=True)
 
 
 if __name__ == '__main__':

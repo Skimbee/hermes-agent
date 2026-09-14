@@ -86,4 +86,4 @@ python3 -m unittest discover -s scripts/bridge -p 'test_*.py' -v
 uv run --no-project --with PyYAML==6.0.3 python3 scripts/bridge/check_workflows.py
 ```
 
-`bridge-release-ci.yml` runs these checks without App/environment access on the integration branch and relevant PRs.
+`bridge-release-ci.yml` runs these checks without App/environment access on the integration branch and relevant PRs. The downstream preparation interoperability test requires the trusted hosted runner's `git check-attr --source`; absence is a failure there. The older Git inside the candidate sandbox is not that controller's execution target, so only this separate interoperability test may skip there. The core reconciliation/commit/receipt test always runs, and the required exact-head hosted CI covers the controller test.
