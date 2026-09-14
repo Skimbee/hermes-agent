@@ -15,7 +15,7 @@ def protected_paths(paths):
     result=[]
     for path in paths:
         require(type(path) is str and path and not path.startswith('/') and not any(x in ('','.','..') for x in path.split('/')),'Unsafe path')
-        if path.startswith(('.github/','scripts/')) or path in ('CODEOWNERS','docs/CODEOWNERS'):result.append(path)
+        if path.startswith(('.github/workflows/bridge-','scripts/bridge/')) or path in ('.github/CODEOWNERS','CODEOWNERS','docs/CODEOWNERS','tests/plugins/memory/test_hindsight_pin_contract.py'):result.append(path)
     return sorted(set(result))
 
 def owner_approved(reviews,candidate):

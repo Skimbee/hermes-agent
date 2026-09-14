@@ -13,9 +13,9 @@ The GitHub schedule is intentionally absent: one external scheduler owns the hou
 Release jobs are separate runners:
 
 1. `verify`: read-only; authenticated GitHub run/workflow metadata, both archive digests, original receipts, bundle and Git ancestry, controller/attempt identity and external snapshot count. Produces immutable proof artifact.
-2. `stage`: repository-scoped Contents/PR App token; re-verifies evidence, uploads the unchanged candidate and creates/reuses one App-authored PR.
+2. `stage`: repository-scoped Contents/PR App token (conditional Workflows permission, below); re-verifies evidence, uploads the unchanged candidate and creates/reuses one App-authored PR.
 3. `attest`: Checks-only App token; requires the completed verifier and stage jobs, re-verifies evidence, issues an exact-SHA check bound to run, attempt, proof artifact ID and canonical proof hash.
-4. `publish`: Contents-only App token; re-verifies proof and completed predecessor jobs, validates App check, unchanged base and exact PR. Protected paths require Skimbee's current exact-head approval. Updates main with `force:false` and reads the exact target back. No merge API, rewritten commit or bypass.
+4. `publish`: Contents App token (conditional Workflows permission, below); re-verifies proof and completed predecessor jobs, validates App check, unchanged base and exact PR. Protected paths require Skimbee's current exact-head approval. Updates main with `force:false` and reads the exact target back. No merge API, rewritten commit or bypass.
 
 The candidate/Dashboard source workflows must be completed successfully before verification. The release workflow itself necessarily remains in progress while it publishes; trust is attached to its **already completed verifier job**, not a falsely anticipated final workflow conclusion.
 
@@ -51,15 +51,86 @@ upstream code or other dependency changes pass all gates.
 
 ## Review policy
 
-Protected paths: `.github/**`, `scripts/**`, root `CODEOWNERS`, `docs/CODEOWNERS`.
+Protected fork-owned paths: `.github/workflows/bridge-*`, `scripts/bridge/**`,
+all three recognized `CODEOWNERS` locations, and
+`tests/plugins/memory/test_hindsight_pin_contract.py`. The pin regression gate
+and all existing candidate/SDK/isolated Dashboard checks remain mandatory.
 
-Target protection: App 4931424's `Bridge release / exact-candidate`, strict checks, admin enforcement, code-owner reviews, stale review dismissal, no force-push/deletion; general approval count 0 and last-push-global-approval false. This combination was proven on `lab-selective-review`: routine changes published exactly without a review; protected changes were rejected by GitHub with `Waiting on code owner review from Skimbee.`
+For other changed `.github/**` and `scripts/**` files, the trusted verifier
+compares Git mode/type/blob identities against both the official upstream and
+the merge base. Only changes identical to upstream **and** replacing a base
+file identical to the common ancestor are routine. New upstream files and
+upstream deletions are supported; fork-only edits/deletions or overwritten
+fork customizations still require exact-head owner review. Renames cannot
+hide a protected deletion. This classification comes from the verified Git
+trees, not a path list supplied by the candidate.
+
+Before granting an upstream exemption, the verifier fetches the official
+`NousResearch/hermes-agent` main and proves that the receipt's upstream commit
+is on that history. It never checks out or executes candidate code. Existing
+customizations in ordinary runtime files remain subject to the focused
+regression gates; this policy does not freeze whole upstream runtime files.
+
+Target protection: App 4931424's `Bridge release / exact-candidate`, strict checks, admin enforcement, code-owner reviews, stale review dismissal, no force-push/deletion; general approval count 0 and last-push-global-approval false. The earlier broad-path combination was proven on `lab-selective-review` (not live acceptance of this selective policy): routine changes published exactly without a review; protected changes were rejected by GitHub with `Waiting on code owner review from Skimbee.`
 
 **This repository's live rules have not been changed by the code package.** The integration rollout must separately compare the entire protection before/after and preserve everything except the explicitly intended two review settings.
 
+
+## Protection trade-off and regression contract
+
+Outside the explicit CODEOWNERS entries, detected fork control overrides are
+protected by the trusted verifier, not independently by GitHub CODEOWNERS.
+This is deliberate: upstream files must remain updatable. Ordinary upstream
+regression tests may evolve; their immutability is not promised. The fork-owned
+Hindsight pin test, bridge controller and its hard SDK check remain protected.
+Changes to those contracts require owner review. Candidate regression success
+alone is not proof that upstream code or its tests are benign.
+
 ## App permission boundary
 
-No Workflows or Administration permissions are introduced. An App token with Contents write cannot upload a changed `.github/workflows/` tree. For such candidates, the authorized owner uploads the exact verified bundle to `bridge/candidate/<SHA>` without changing main. The App can then reuse the exact branch and create the review PR. The code refuses an automatic upload in this case; it never silently requests a broader token.
+Workflow-write activation is an explicit deployment gate, **off when unset**.
+The controller reports `workflow_write_required` from its verified proof.
+Only `stage` and `publish` request repository-scoped Workflows write, only
+when that output is true and the repository variable
+`BRIDGE_WORKFLOW_WRITES_ENABLED` is exactly `true`. `attest` remains Checks-only;
+no Administration permission is requested. Expanding the App's installation
+permission and enabling the variable require a separate owner decision.
+
+With activation enabled, stage may upload workflow changes automatically only
+when **every** changed workflow is an unchanged upstream import and none is
+protected. Protected or fork-modified workflows keep the exact-bundle owner
+upload path. Existing exact branches are reused, never rewritten. Publication
+still requires owner approval whenever any protected path changed, and retains
+the exact App check, fresh-base checks and `force:false` readback.
+
+Workflows write is also conditionally requested for publication: staging a Git
+object is not evidence that a Contents-only token can advance main to a changed
+workflow tree. Missing activation fails explicitly before a workflow write;
+no retry, fallback credential or permission escalation occurs.
+
+### Deployment and rollback
+
+This code does not grant GitHub permissions or activate repository variables.
+Before merge, independently review this policy change and verify exact-head CI.
+Record the current CODEOWNERS, App installation permissions, activation-variable
+presence/value and complete branch protection. Keep branch protection unchanged.
+Under separate owner approval, grant this App Workflows write for this repository
+and activate `BRIDGE_WORKFLOW_WRITES_ENABLED=true`. Then exercise a fresh complete
+candidate/Dashboard/release chain. Local/synthetic tests do not replace that live
+acceptance. Never reuse a proof bound to a previous main.
+
+Rollback first disables workflow writes (restore the previous variable state);
+then removes the added App permission under the approved rollback contract.
+Restore the prior reviewed policy through a normal protected change if needed,
+not a force-push or protection bypass. An in-flight run needs an explicit decision:
+do not revoke credentials mid-write or assume changing a variable cancels a run.
+
+Upstream workflows can execute already when the candidate branch is staged
+or its same-repository PR opens, BEFORE publication or owner review. Provenance
+is not a guarantee of benign code. Keep App keys in the main-only publisher
+environment, default GITHUB_TOKEN read-only, and review repository-secret
+exposure before enabling workflow writes. Adopted actions may use mutable tags;
+only our bridge workflows are SHA-pinned by the local contract checker.
 
 ## Resume after a manual gate
 
@@ -75,8 +146,8 @@ Do not choose **Re-run failed jobs**: that creates an attempt without its own co
 
 - Policy, provenance, snapshot and stateful synthetic API integration tests are not a full live fork release.
 - The existing container E2E was live verified in the separate lab. The adapted fork workflow and its complete release chain still require acceptance after the reviewed bootstrap.
-- New control files must receive human codeowner review before they become trusted main code. No further Admin exception is permitted.
-- Bootstrap requires an App-authored PR, exact-head independent evidence, owner approval and the existing App-issued required check. A regular squash/rebase/merge that changes the tested SHA is not a substitute.
+- New fork-owned or unverified control files require owner review. Exact, unchanged upstream imports follow the provenance policy above.
+- Automated releases retain their exact candidate/App evidence requirements; owner maintenance uses the separate documented PR-only route in README.maintenance.md, never a fabricated release check.
 - Candidate-controlled UI/receipt observations plus a trusted tracked-tree snapshot do not prove benign runtime code or every unversioned dependency.
 
 ## Tests

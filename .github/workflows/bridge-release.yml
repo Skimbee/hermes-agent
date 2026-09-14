@@ -21,6 +21,7 @@ jobs:
   verify:
     outputs:
       publishable: ${{ steps.verify.outputs.publishable }}
+      workflow_write_required: ${{ steps.verify.outputs.workflow_write_required }}
     if: github.repository == 'Skimbee/hermes-agent' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -61,11 +62,13 @@ jobs:
           repositories: hermes-agent
           skip-token-revoke: false
           permission-contents: write
+          permission-workflows: ${{ needs.verify.outputs.workflow_write_required == 'true' && vars.BRIDGE_WORKFLOW_WRITES_ENABLED == 'true' && 'write' || '' }}
           permission-pull-requests: write
       - name: stage exact candidate
         env:
           GH_TOKEN: ${{ github.token }}
           APP_TOKEN: ${{ steps.app.outputs.token }}
+          BRIDGE_WORKFLOW_WRITES_ENABLED: ${{ vars.BRIDGE_WORKFLOW_WRITES_ENABLED }}
         run: python3 scripts/bridge/release_v2.py stage
   attest:
     needs: [verify, stage]
@@ -112,11 +115,13 @@ jobs:
           repositories: hermes-agent
           skip-token-revoke: false
           permission-contents: write
+          permission-workflows: ${{ needs.verify.outputs.workflow_write_required == 'true' && vars.BRIDGE_WORKFLOW_WRITES_ENABLED == 'true' && 'write' || '' }}
       - name: publish exact candidate
         env:
           GH_TOKEN: ${{ github.token }}
           APP_TOKEN: ${{ steps.app.outputs.token }}
           BRIDGE_RELEASE_ENABLED: ${{ vars.BRIDGE_RELEASE_ENABLED }}
+          BRIDGE_WORKFLOW_WRITES_ENABLED: ${{ vars.BRIDGE_WORKFLOW_WRITES_ENABLED }}
         run: python3 scripts/bridge/release_v2.py publish
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

@@ -6,9 +6,9 @@ from unittest.mock import patch
 import release_v2 as m
 
 class ReleaseIntegrationTests(unittest.TestCase):
-    def exercise(self,mode='publish',protected=False,approved=False,wrong_check=False,moved=False,proof_changed=False,enabled=True):
+    def exercise(self,mode='publish',protected=False,approved=False,wrong_check=False,moved=False,proof_changed=False,enabled=True,workflow=False,workflow_enabled=False,missing_branch=False,non_upstream=False):
         run={'id':44,'run_attempt':1,'head_sha':'a'*40}
-        proof={'schema':3,'base':'a'*40,'candidate':'b'*40,'parents':['a'*40],'first_parent_contains_base':True,'dashboard_run':{'id':22},'protected_paths':['scripts/x.py'] if protected else []}
+        proof={'schema':3,'base':'a'*40,'candidate':'b'*40,'parents':['a'*40],'first_parent_contains_base':True,'dashboard_run':{'id':22},'protected_paths':['scripts/bridge/x.py'] if protected else [],'workflow_changes':['.github/workflows/osv-scanner.yml'] if workflow else [],'upstream_workflow_changes':['.github/workflows/osv-scanner.yml'] if workflow and not non_upstream else []}
         document={'proof':proof,'proof_sha256':m.canonical_hash(proof)};artifact={'id':55,'digest':'sha256:'+'c'*64}
         fresh=copy.deepcopy(proof)
         if proof_changed:fresh['candidate']='f'*40
@@ -33,24 +33,47 @@ class ReleaseIntegrationTests(unittest.TestCase):
                 return [{'id':1,'state':'APPROVED','commit_id':'b'*40,'user':{'type':'User','login':'Skimbee'}}] if approved else []
             if path.startswith('commits/') and '/check-runs?' in path:return {'total_count':1,'check_runs':[check]}
             if path.startswith('check-runs/'):return check
-            if path.startswith('git/matching-refs/'):return [{'ref':'refs/heads/'+branch,'object':{'sha':'b'*40}}]
+            if path.startswith('git/matching-refs/'):return [] if missing_branch else [{'ref':'refs/heads/'+branch,'object':{'sha':'b'*40}}]
             if path=='git/ref/heads/'+branch:return {'object':{'sha':'b'*40}}
             self.fail('Unexpected synthetic API read '+path)
         with tempfile.TemporaryDirectory() as temp,contextlib.ExitStack() as stack:
             old=os.getcwd();os.chdir(temp);stack.callback(os.chdir,old)
-            stack.enter_context(patch.dict(os.environ,{'RUNNER_TEMP':temp,'BRIDGE_RELEASE_ENABLED':'true' if enabled else 'false'}))
-            stack.enter_context(patch('sys.argv',['release_v2.py',mode]))
+            stack.enter_context(patch.dict(os.environ,{'RUNNER_TEMP':temp,'GITHUB_OUTPUT':str(pathlib.Path(temp)/'outputs'),'BRIDGE_RELEASE_ENABLED':'true' if enabled else 'false','BRIDGE_WORKFLOW_WRITES_ENABLED':'true' if workflow_enabled else 'false','APP_TOKEN':'synthetic-fixture-no-credential'}))
+            stack.enter_context(patch('sys.argv',['release_v2.py',mode]+(['--dashboard-run','22'] if mode=='verify' else [])))
             stack.enter_context(patch.object(m,'run_context',return_value=run))
             stack.enter_context(patch.object(m,'source_proof',return_value=(document,artifact)))
             stack.enter_context(patch.object(m,'verify',return_value=(fresh,pathlib.Path(temp)/'objects.git')))
             stack.enter_context(patch.object(m,'completed_job'))
             stack.enter_context(patch.object(m,'api',side_effect=api))
+            push=stack.enter_context(patch.object(m.subprocess,'run'))
             try:m.main()
             except ValueError:
                 self.assertEqual(state['writes'],[],'Fail-closed case performed write')
+                push.assert_not_called()
                 raise
+            state['outputs']=dict(line.split('=',1) for line in pathlib.Path('outputs').read_text().splitlines()) if pathlib.Path('outputs').exists() else {}
             output=json.loads(pathlib.Path('publication.json').read_text()) if pathlib.Path('publication.json').exists() else None
+        state['push_calls']=push.call_count
         return state,output
+    def test_verifier_reports_permission_need_from_the_exact_proof(self):
+        state,_=self.exercise(mode='verify',workflow=True)
+        self.assertEqual(state['outputs'],{'publishable':'true','workflow_write_required':'true'})
+        state,_=self.exercise(mode='verify')
+        self.assertEqual(state['outputs'],{'publishable':'true','workflow_write_required':'false'})
+
+    def test_workflow_upload_requires_activation_and_allows_verified_upstream(self):
+        with self.assertRaisesRegex(ValueError,'WORKFLOW_WRITE_ACTIVATION_REQUIRED'):
+            self.exercise(mode='stage',workflow=True,missing_branch=True)
+        with self.assertRaisesRegex(ValueError,'MANUAL_WORKFLOW_BRANCH_UPLOAD_REQUIRED'):
+            self.exercise(mode='stage',workflow=True,workflow_enabled=True,missing_branch=True,non_upstream=True)
+        state,_=self.exercise(mode='stage',workflow=True,workflow_enabled=True,missing_branch=True)
+        self.assertEqual(state['push_calls'],1)
+        self.assertEqual(state['head'],'a'*40)
+        with self.assertRaisesRegex(ValueError,'WORKFLOW_WRITE_ACTIVATION_REQUIRED'):
+            self.exercise(workflow=True)
+        state,result=self.exercise(workflow=True,workflow_enabled=True)
+        self.assertTrue(result['exact_sha_published'])
+
     def test_routine_publishes_exact_commit(self):
         state,result=self.exercise();self.assertEqual(state['head'],'b'*40);self.assertTrue(result['exact_sha_published'])
     def test_control_waits_for_owner_without_write(self):

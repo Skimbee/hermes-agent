@@ -1,6 +1,8 @@
-# Controller and release-policy changes require owner review.
-# GitHub branch protection enforces approval and invalidates stale reviews.
-/.github/ @Skimbee
-/scripts/ @Skimbee
+# Protect our controller, policy and pin invariant, not entire upstream folders.
+# The trusted verifier also requires review for non-upstream/fork-modified controls.
+/.github/workflows/bridge-* @Skimbee
+/scripts/bridge/ @Skimbee
+/.github/CODEOWNERS @Skimbee
 /CODEOWNERS @Skimbee
 /docs/CODEOWNERS @Skimbee
+/tests/plugins/memory/test_hindsight_pin_contract.py @Skimbee
