@@ -78,6 +78,44 @@ def verify_first_parent(base,candidate,git):
     chain=git('rev-list','--first-parent',candidate).decode('ascii').splitlines()
     require(chain and chain[0]==candidate and base in chain,'Base absent from actual first-parent chain')
 
+def verify_official_upstream(upstream,git):
+    sha(upstream)
+    git('fetch','--no-tags','https://github.com/NousResearch/hermes-agent.git','refs/heads/main')
+    git('merge-base','--is-ancestor',upstream,'FETCH_HEAD')
+
+
+def classify_control_changes(base,candidate,upstream,git):
+    """Exempt only exact upstream changes that overwrite no fork customization.
+
+    Git mode/type/object identity includes deletions and mode changes. The caller
+    must independently establish that upstream is on the official main history.
+    No checkout, filters, candidate imports or candidate-supplied path lists.
+    """
+    for value in (base,candidate,upstream):sha(value)
+    ancestor=git('merge-base',base,upstream).decode().strip();sha(ancestor)
+    def tree(commit):
+        entries={}
+        for entry in git('ls-tree','-rz',commit).split(b'\0'):
+            if entry:
+                metadata,path=entry.split(b'\t',1)
+                entries[path.decode('utf-8')]=metadata
+        return entries
+    before,after,original,incoming=map(tree,(base,candidate,ancestor,upstream))
+    paths=sorted(p for p in before.keys()|after.keys() if before.get(p)!=after.get(p))
+    protected=set(protected_paths(paths))
+    workflows=[];upstream_workflows=[]
+    for path in paths:
+        if not path.startswith(('.github/','scripts/')):continue
+        upstream_owned=(path not in protected and before.get(path)==original.get(path)
+                        and after.get(path)==incoming.get(path))
+        if not upstream_owned:protected.add(path)
+        if path.startswith('.github/workflows/'):
+            workflows.append(path)
+            if upstream_owned:upstream_workflows.append(path)
+    return {'protected_paths':sorted(protected),'workflow_changes':workflows,
+            'upstream_workflow_changes':upstream_workflows}
+
+
 def verify(dashboard_id,workdir):
     require(type(dashboard_id) is int and dashboard_id>0,'Dashboard ID')
     base=api('git/ref/heads/main')['object']['sha']
@@ -118,9 +156,10 @@ def verify(dashboard_id,workdir):
     verify_first_parent(base,r['candidate'],git)
     validate_candidate(base,base,r['candidate'],parents,first_parent_contains_base=True)
     for ancestor in (base,r['upstream']):git('merge-base','--is-ancestor',ancestor,r['candidate'])
-    paths=[p.decode('utf-8') for p in git('diff','--no-renames','--name-only','-z',base,r['candidate']).split(b'\0') if p]
+    verify_official_upstream(r['upstream'],git)
+    classification=classify_control_changes(base,r['candidate'],r['upstream'],git)
     tracked=git('ls-tree','-rz',r['candidate']).split(b'\0')
     require(result['tracked_files_verified']==len([x for x in tracked if x]),'Independent tree count')
     require(api('git/ref/heads/main')['object']['sha']==base,'Main moved')
-    proof={'schema':3,'repository':REPO,'base':base,'candidate':r['candidate'],'upstream':r['upstream'],'parents':parents,'first_parent_contains_base':True,'candidate_run':identity(c),'candidate_artifact':{'id':ca['id'],'digest':ca['digest']},'dashboard_run':identity(d),'dashboard_artifact':{'id':da['id'],'digest':da['digest']},'bundle_sha256':r['bundle_sha256'],'receipt_sha256':hashlib.sha256(cz.read('receipt.json')).hexdigest(),'protected_paths':protected_paths(paths),'tracked_files_verified':result['tracked_files_verified'],'evidence_verified':True}
+    proof={'schema':3,'repository':REPO,'base':base,'candidate':r['candidate'],'upstream':r['upstream'],'parents':parents,'first_parent_contains_base':True,'candidate_run':identity(c),'candidate_artifact':{'id':ca['id'],'digest':ca['digest']},'dashboard_run':identity(d),'dashboard_artifact':{'id':da['id'],'digest':da['digest']},'bundle_sha256':r['bundle_sha256'],'receipt_sha256':hashlib.sha256(cz.read('receipt.json')).hexdigest(),**classification,'tracked_files_verified':result['tracked_files_verified'],'evidence_verified':True}
     return proof,repo

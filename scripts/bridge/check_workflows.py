@@ -16,6 +16,9 @@ for path in sorted((root/'.github/workflows').glob('bridge-*.yml')):
 release=workflows['bridge-release.yml']
 assert release['permissions']=={'contents':'read','actions':'read','checks':'read','pull-requests':'read'}
 assert release['jobs']['verify'].get('environment') is None
+assert release['jobs']['verify']['outputs']['workflow_write_required']=='${{ steps.verify.outputs.workflow_write_required }}'
+owners=[line.split() for line in (root/'.github/CODEOWNERS').read_text().splitlines() if line.strip() and not line.startswith('#')]
+assert owners==[[p,'@Skimbee'] for p in ('/.github/workflows/bridge-*','/scripts/bridge/','/.github/CODEOWNERS','/CODEOWNERS','/docs/CODEOWNERS','/tests/plugins/memory/test_hindsight_pin_contract.py')]
 for mode in ['verify','stage','attest','publish']:
     job=release['jobs'][mode]
     assert "github.ref == 'refs/heads/main'" in job['if']
@@ -25,7 +28,12 @@ for mode in ['verify','stage','attest','publish']:
         assert job['environment']=='bridge-publisher'
         apps=[s['with'] for s in job['steps'] if s.get('uses','').startswith('actions/create-github-app-token@')]
         assert len(apps)==1 and apps[0]['repositories']=='hermes-agent' and apps[0]['skip-token-revoke']=='false'
-        assert 'permission-administration' not in apps[0] and 'permission-workflows' not in apps[0]
+        assert 'permission-administration' not in apps[0]
+        if mode=='attest':assert 'permission-workflows' not in apps[0]
+        else:
+            assert apps[0]['permission-workflows']=="${{ needs.verify.outputs.workflow_write_required == 'true' && vars.BRIDGE_WORKFLOW_WRITES_ENABLED == 'true' && 'write' || '' }}"
+            action=[s for s in job['steps'] if s.get('name')==('stage exact candidate' if mode=='stage' else 'publish exact candidate')][0]
+            assert action['env']['BRIDGE_WORKFLOW_WRITES_ENABLED']=='${{ vars.BRIDGE_WORKFLOW_WRITES_ENABLED }}'
         if mode=='attest':assert apps[0].get('permission-checks')=='write' and 'permission-contents' not in apps[0]
         else:assert apps[0].get('permission-contents')=='write' and 'permission-checks' not in apps[0]
 assert "vars.BRIDGE_RELEASE_ENABLED == 'true'" in release['jobs']['publish']['if']

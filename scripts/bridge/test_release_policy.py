@@ -5,9 +5,9 @@ import release_policy as p
 
 class PolicyTests(unittest.TestCase):
     def test_protected_paths_require_owner(self):
-        for path in ('.github/workflows/ci.yml','scripts/new.py','CODEOWNERS','docs/CODEOWNERS'):
+        for path in ('.github/workflows/bridge-release.yml','scripts/bridge/new.py','.github/CODEOWNERS','CODEOWNERS','docs/CODEOWNERS','tests/plugins/memory/test_hindsight_pin_contract.py'):
             with self.subTest(path=path):self.assertTrue(p.protected_paths(['tools/x.py',path]))
-        self.assertEqual(p.protected_paths(['tools/x.py','tests/test_x.py']),[])
+        self.assertEqual(p.protected_paths(['tools/x.py','tests/test_x.py','.github/workflows/osv-scanner.yml','scripts/install.sh']),[])
 
     def test_approval_is_latest_owner_state_on_exact_head(self):
         head='b'*40

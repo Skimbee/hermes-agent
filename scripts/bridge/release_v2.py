@@ -55,7 +55,9 @@ def main():
             proof,_=verify(args.dashboard_run,pathlib.Path(temp)/'verified')
         document={'release_run':run['id'],'release_attempt':run['run_attempt'],'controller':run['head_sha'],'proof':proof,'proof_sha256':canonical_hash(proof)}
         pathlib.Path('proof.json').write_text(json.dumps(document,indent=2))
-        with open(os.environ['GITHUB_OUTPUT'],'a') as out:out.write('publishable='+('false' if proof.get('no_change') else 'true')+'\n')
+        with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+            out.write('publishable='+('false' if proof.get('no_change') else 'true')+'\n')
+            out.write('workflow_write_required='+('true' if proof.get('workflow_changes') else 'false')+'\n')
         print('NO_CHANGE_VERIFIED' if proof.get('no_change') else 'EVIDENCE_VERIFIED',proof['candidate']);return
     document,proof_artifact=source_proof(run);proof=document['proof']
     require(proof.get('no_change') is not True,'No-change proof cannot authorize publication')
@@ -71,8 +73,10 @@ def main():
             if refs:
                 require(refs[0]['ref']=='refs/heads/'+branch and refs[0]['object']['sha']==proof['candidate'],'Existing branch differs')
             else:
-                workflow_changes=[p for p in proof['protected_paths'] if p.startswith('.github/workflows/')]
-                require(not workflow_changes,'MANUAL_WORKFLOW_BRANCH_UPLOAD_REQUIRED: App has deliberately no Workflows write permission. Upload the verified bundle to '+branch+' using the authorized owner path; main stays unchanged. Then start ALL jobs with: '+restart_command(proof['dashboard_run']['id']))
+                workflow_changes=proof['workflow_changes']
+                require(workflow_changes==proof['upstream_workflow_changes'] and not set(workflow_changes)&set(proof['protected_paths']),'MANUAL_WORKFLOW_BRANCH_UPLOAD_REQUIRED: Protected or non-upstream workflow changes require the authorized owner upload of the exact verified bundle to '+branch+'. Then start ALL jobs with: '+restart_command(proof['dashboard_run']['id']))
+                if workflow_changes:
+                    require(os.environ.get('BRIDGE_WORKFLOW_WRITES_ENABLED')=='true','WORKFLOW_WRITE_ACTIVATION_REQUIRED: authorize the scoped App permission and repository activation first')
                 env=os.environ.copy()
                 env.update({'GIT_CONFIG_COUNT':'3','GIT_CONFIG_KEY_0':'http.https://github.com/.extraheader','GIT_CONFIG_VALUE_0':'AUTHORIZATION: basic '+base64.b64encode(('x-access-token:'+os.environ['APP_TOKEN']).encode()).decode(),'GIT_CONFIG_KEY_1':'core.hooksPath','GIT_CONFIG_VALUE_1':'/dev/null','GIT_CONFIG_KEY_2':'credential.helper','GIT_CONFIG_VALUE_2':''})
                 subprocess.run(['git','--git-dir='+str(repo),'push','https://github.com/'+REPO+'.git',proof['candidate']+':refs/heads/'+branch],env=env,check=True,timeout=180)
@@ -99,6 +103,8 @@ def main():
         require(len(checks)==1,'Check count');validate_check(checks[0],proof['candidate'],external,url)
         require(api('git/ref/heads/main')['object']['sha']==proof['base'],'Main moved before publication')
         exact_pr(proof)
+        if proof['workflow_changes']:
+            require(os.environ.get('BRIDGE_WORKFLOW_WRITES_ENABLED')=='true','WORKFLOW_WRITE_ACTIVATION_REQUIRED: workflow publication is not activated')
         api('git/refs/heads/main','PATCH',{'sha':proof['candidate'],'force':False},app=True)
         require(api('git/ref/heads/main')['object']['sha']==proof['candidate'],'Publication readback mismatch')
         require(api('branches/main')['protected'] is True,'Protection readback absent')
