@@ -54,6 +54,7 @@ jobs:
           git checkout --detach "$GITHUB_SHA"
           # Freeze the trusted helper before merging any incoming source.
           git show "$GITHUB_SHA:scripts/bridge/lock_metadata.py" > ../bridge-lock-metadata.py
+          git show "$GITHUB_SHA:scripts/bridge/patches/legacy-file-signature.patch" > ../legacy-file-signature.patch
           printf '%s\n' "$GITHUB_SHA" > ../candidate-base.txt
           git merge --no-edit 2f542d949e5729586c6163d027d54c8931fd7cf6
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
@@ -72,6 +73,17 @@ jobs:
           else
             printf 'has_candidate=true\n' >> "$GITHUB_OUTPUT"
           fi
+      - name: Apply legacy updater import compatibility fix
+        if: steps.build.outputs.has_candidate != 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          # Regression-verified production fix d44af15402957b31c13574a73de35741b825e579.
+          # Fail closed on upstream drift; never alter the installed old base.
+          git apply --check --index ../legacy-file-signature.patch
+          git apply --index ../legacy-file-signature.patch
+          git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m 'fix: decouple file signatures from legacy updater utils cache'
       - name: Reconcile missing lock exclusion metadata
         if: steps.build.outputs.has_candidate != 'false'
         shell: bash
@@ -104,7 +116,7 @@ jobs:
         run: |
           set -euo pipefail
           cd candidate
-          bash scripts/run_tests.sh tests/plugins/memory/test_hindsight_pin_contract.py tests/plugins/memory/test_hindsight_provider.py tests/test_packaging_metadata.py tests/tools/test_lazy_deps.py tests/tools/test_lazy_deps_managed.py tests/tools/test_lazy_deps_durable_target.py tests/hermes_cli/test_update_upstream_prompt_noninteractive.py
+          bash scripts/run_tests.sh tests/plugins/memory/test_hindsight_pin_contract.py tests/plugins/memory/test_hindsight_provider.py tests/test_packaging_metadata.py tests/tools/test_lazy_deps.py tests/tools/test_lazy_deps_managed.py tests/tools/test_lazy_deps_durable_target.py tests/hermes_cli/test_update_upstream_prompt_noninteractive.py tests/hermes_cli/test_legacy_update_imports.py
       - name: Exercise failing assertion
         if: inputs.rehearsal == 'test-failure'
         run: python3 -c 'assert False, "Intentional failure rehearsal; no publication allowed"'

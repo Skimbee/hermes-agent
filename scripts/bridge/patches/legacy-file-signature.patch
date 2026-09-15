@@ -1,0 +1,347 @@
+diff --git a/agent/moa_loop.py b/agent/moa_loop.py
+index d0f9a05db2..0be23b812e 100644
+--- a/agent/moa_loop.py
++++ b/agent/moa_loop.py
+@@ -124,7 +124,7 @@ def _resolve_preset_cached(preset_name: str) -> tuple[dict[str, Any], Any]:
+     (skips resolve_moa_preset's full validation of the moa block on every create())."""
+     from hermes_cli.config import get_config_path, load_config
+     from hermes_cli.moa_config import resolve_moa_preset
+-    from utils import file_signature
++    from file_signature import file_signature
+     try:
+         cfg_stamp = file_signature(get_config_path().stat())
+     except OSError:
+diff --git a/agent/prompt_builder.py b/agent/prompt_builder.py
+index 2a2ebafa09..94a9ac8197 100644
+--- a/agent/prompt_builder.py
++++ b/agent/prompt_builder.py
+@@ -28,7 +28,8 @@ from agent.skill_utils import (
+     skill_matches_platform, skill_matches_platform_list,
+ )
+ from tools.threat_patterns import scan_for_threats as _scan_for_threats
+-from utils import atomic_json_write, file_signature
++from utils import atomic_json_write
++from file_signature import file_signature
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/agent/skill_utils.py b/agent/skill_utils.py
+index 17b83186a1..f439d26a6f 100644
+--- a/agent/skill_utils.py
++++ b/agent/skill_utils.py
+@@ -219,7 +219,7 @@ def _raw_config_cache_clear() -> None:
+ def _config_cache_key(config_path: Path) -> Optional[Tuple[str, int, int, int, int]]:
+     """``(path, *file_signature)`` identity of config.yaml, or None when unreadable/absent."""
+     try:
+-        from utils import file_signature
++        from file_signature import file_signature
+         return (str(config_path), *file_signature(config_path.stat()))
+     except OSError:
+         return None
+diff --git a/file_signature.py b/file_signature.py
+new file mode 100644
+index 0000000000..5278fcafea
+--- /dev/null
++++ b/file_signature.py
+@@ -0,0 +1,19 @@
++"""Stat-based change detection, independent of the cached pre-update utils module.
++
++Legacy updaters retain utils while importing fresh config/gateway modules. Keep
++this helper in its own module so those consumers do not require a newer utils.
++"""
++
++import os
++
++
++def file_signature(st: os.stat_result) -> "tuple[int, int, int, int]":
++    """Change-detection key for a stat result: ``(st_mtime_ns, st_size, st_ino, st_ctime_ns)``.
++
++    mtime + size alone miss a replacement that preserves both (``cp -p``, ``rsync -t``, a tar
++    restore, a script pinning the timestamp with ``os.utime``). The inode changes on an atomic
++    replace and ctime cannot be backdated from user space, so the pair catches those writers.
++    On Windows ``st_ino`` may be 0 and ``st_ctime_ns`` is the creation time — both stable across
++    an in-place rewrite, so the key degrades to mtime + size there rather than misfiring.
++    """
++    return (st.st_mtime_ns, st.st_size, st.st_ino, st.st_ctime_ns)
+diff --git a/gateway/run_profile_reconcile.py b/gateway/run_profile_reconcile.py
+index 4aa4ed975f..68e4b7ed68 100644
+--- a/gateway/run_profile_reconcile.py
++++ b/gateway/run_profile_reconcile.py
+@@ -22,7 +22,7 @@ from pathlib import Path
+ from typing import Any, Dict, Optional
+ 
+ from gateway.run_shutdown import _log_suppressed
+-from utils import file_signature
++from file_signature import file_signature
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/hermes_cli/auth.py b/hermes_cli/auth.py
+index 79522c3c3d..b4281953c4 100644
+--- a/hermes_cli/auth.py
++++ b/hermes_cli/auth.py
+@@ -32,7 +32,8 @@ from hermes_cli.config import (
+     get_hermes_home, get_config_path, read_raw_config, require_readable_config_before_write)
+ from hermes_constants import OPENROUTER_BASE_URL, hermes_home_key, secure_parent_dir
+ from agent.credential_persistence import sanitize_borrowed_credential_payload
+-from utils import atomic_json_write, atomic_yaml_write, env_float, file_signature, is_truthy_value  # noqa: F401  (env_float: agent.credential_pool reads auth_mod.env_float)
++from utils import atomic_json_write, atomic_yaml_write, env_float, is_truthy_value  # noqa: F401  (env_float: agent.credential_pool reads auth_mod.env_float)
++from file_signature import file_signature
+ from hermes_cli.auth_zai_kimi import (  # noqa: F401  re-exported
+     KIMI_CODE_BASE_URL, ZAI_ENDPOINTS, _normalize_lmstudio_runtime_base_url, _resolve_kimi_base_url,
+     _resolve_zai_base_url, detect_zai_endpoint)
+diff --git a/hermes_cli/auth_oauth_grants.py b/hermes_cli/auth_oauth_grants.py
+index 87a60e1fd3..bf899b2497 100644
+--- a/hermes_cli/auth_oauth_grants.py
++++ b/hermes_cli/auth_oauth_grants.py
+@@ -12,7 +12,7 @@ import os
+ from pathlib import Path
+ from typing import Any, Dict, List, Optional, Tuple
+ from hermes_cli.auth_constants import _decode_jwt_claims
+-from utils import file_signature
++from file_signature import file_signature
+ 
+ # Log-record parity with the origin module (caplog tests pin "hermes_cli.auth").
+ logger = logging.getLogger("hermes_cli.auth")
+diff --git a/hermes_cli/cli_info_mixin.py b/hermes_cli/cli_info_mixin.py
+index 76aa226a70..b01b70886f 100644
+--- a/hermes_cli/cli_info_mixin.py
++++ b/hermes_cli/cli_info_mixin.py
+@@ -16,7 +16,8 @@ import time
+ 
+ from hermes_constants import is_termux as _is_termux_environment
+ from rich.markup import escape as _escape
+-from utils import base_url_hostname, file_signature
++from utils import base_url_hostname
++from file_signature import file_signature
+ 
+ from hermes_cli.cli_modal_mixin import _gated_confirm
+ from hermes_cli.colors import Colors as _Colors
+diff --git a/hermes_cli/cli_tui_mixin.py b/hermes_cli/cli_tui_mixin.py
+index 909dedd445..4d13037b80 100644
+--- a/hermes_cli/cli_tui_mixin.py
++++ b/hermes_cli/cli_tui_mixin.py
+@@ -1818,7 +1818,7 @@ class CLITuiMixin:
+ 
+         # Config file watcher — detect mcp_servers changes and auto-reload.
+         from hermes_cli.config import get_config_path as _get_config_path
+-        from utils import file_signature
++        from file_signature import file_signature
+         _cfg_path = _get_config_path()
+         self._config_sig: tuple | None = file_signature(_cfg_path.stat()) if _cfg_path.exists() else None
+         self._config_mcp_servers: dict = self.config.get("mcp_servers") or {}
+diff --git a/hermes_cli/commands_completion.py b/hermes_cli/commands_completion.py
+index 72e6e009b4..dc70deef7d 100644
+--- a/hermes_cli/commands_completion.py
++++ b/hermes_cli/commands_completion.py
+@@ -30,7 +30,7 @@ def _personalities_from_cli_config() -> Dict[str, Any]:
+     Falls back to a fresh load when the file cannot be stat'ed."""
+     global _personalities_memo
+     from cli import load_cli_config
+-    from utils import file_signature
++    from file_signature import file_signature
+     from hermes_cli.personality import available_personalities
+     try:
+         from hermes_cli.config import get_config_path
+diff --git a/hermes_cli/config.py b/hermes_cli/config.py
+index e46f602e4d..c68f2d191c 100644
+--- a/hermes_cli/config.py
++++ b/hermes_cli/config.py
+@@ -30,7 +30,8 @@ from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
+ from hermes_cli.secret_prompt import masked_secret_prompt
+ # Re-export from hermes_constants — canonical definition lives there.
+ from hermes_constants import get_hermes_home, get_process_hermes_home  # noqa: F401
+-from utils import atomic_replace, atomic_yaml_write, fast_safe_load, file_signature
++from utils import atomic_replace, atomic_yaml_write, fast_safe_load
++from file_signature import file_signature
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/hermes_cli/config_effective.py b/hermes_cli/config_effective.py
+index 3f1ff8a433..c3686b6757 100644
+--- a/hermes_cli/config_effective.py
++++ b/hermes_cli/config_effective.py
+@@ -25,7 +25,7 @@ from utils import fast_safe_load
+ # path -> raw user mapping from the last successful parse in this process; served (through the
+ # normal pipeline) when the file is later found mid-edit as broken YAML.
+ _LAST_GOOD_USER_RAW: Dict[str, Dict[str, Any]] = {}
+-# path -> (*user_signature, *managed_signature, effective, env_snapshot); see utils.file_signature.
++# path -> (*user_signature, *managed_signature, effective, env_snapshot); see file_signature.file_signature.
+ _EFFECTIVE_CACHE: Dict[str, Tuple[Any, ...]] = {}
+ 
+ 
+diff --git a/hermes_cli/managed_scope.py b/hermes_cli/managed_scope.py
+index 0f27db3774..d3178d63b8 100644
+--- a/hermes_cli/managed_scope.py
++++ b/hermes_cli/managed_scope.py
+@@ -17,7 +17,7 @@ from typing import Dict, Optional
+ 
+ import yaml
+ 
+-from utils import file_signature
++from file_signature import file_signature
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/hermes_cli/model_switch.py b/hermes_cli/model_switch.py
+index 0bcb1b5e40..d86cf1f329 100644
+--- a/hermes_cli/model_switch.py
++++ b/hermes_cli/model_switch.py
+@@ -18,7 +18,8 @@ from hermes_cli.providers import (
+ from hermes_cli.model_normalize import normalize_model_for_provider
+ from agent.models_dev import (
+     ModelCapabilities, ModelInfo, get_model_capabilities, get_model_info, list_provider_models)
+-from utils import base_url_host_matches, base_url_hostname, base_url_origin, file_signature
++from utils import base_url_host_matches, base_url_hostname, base_url_origin
++from file_signature import file_signature
+ # Re-exported: callers/tests patch hermes_cli.model_switch.<name>.
+ from hermes_cli.model_switch_providers import list_authenticated_providers
+ 
+diff --git a/model_tools.py b/model_tools.py
+index f0e56c19e2..c863b4a305 100644
+--- a/model_tools.py
++++ b/model_tools.py
+@@ -22,7 +22,7 @@ from tools.registry import CHECK_FN_CACHE_BYPASS, check_fn_cache_scope, discover
+ from tools.registry import _MAX_TOOL_ERROR_CHARS as _TOOL_ERROR_MAX_LEN
+ from toolsets import resolve_toolset, validate_toolset
+ from tools.arg_coercion import coerce_tool_args
+-from utils import file_signature
++from file_signature import file_signature
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/tests/hermes_cli/test_cli_mcp_config_watch.py b/tests/hermes_cli/test_cli_mcp_config_watch.py
+index 2858733879..62f65b3b19 100644
+--- a/tests/hermes_cli/test_cli_mcp_config_watch.py
++++ b/tests/hermes_cli/test_cli_mcp_config_watch.py
+@@ -3,7 +3,7 @@ import time
+ from pathlib import Path
+ from unittest.mock import MagicMock, patch
+ 
+-from utils import file_signature
++from file_signature import file_signature
+ 
+ 
+ def _make_cli(tmp_path, mcp_servers=None, extra_config=None):
+diff --git a/tests/hermes_cli/test_legacy_update_imports.py b/tests/hermes_cli/test_legacy_update_imports.py
+new file mode 100644
+index 0000000000..4fec039e75
+--- /dev/null
++++ b/tests/hermes_cli/test_legacy_update_imports.py
+@@ -0,0 +1,79 @@
++"""Fresh consumers must work with the utils cached by a pre-signature updater.
++
++The d131988d53c3b8389801f6cee03b990bd51ac49a updater evicts hermes_cli,
++agent and gateway modules, but retains utils and the update_receipt singleton.
++Do not call the new purge here: that code cannot fix an already-running updater.
++"""
++
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++import pytest
++
++
++_ROOT = Path(__file__).resolve().parents[2]
++_LEGACY_UTILS = """
++import utils
++# Model the cached pre-update API, not an empty mock module: all other helpers
++# remain real. Never reload/evict utils to make the fresh consumer import work.
++if hasattr(utils, 'file_signature'):
++    del utils.file_signature
++legacy_utils = utils
++"""
++
++
++def _run(script, tmp_path):
++    result = subprocess.run(
++        [sys.executable, "-c", _LEGACY_UTILS + script],
++        cwd=_ROOT,
++        env={**os.environ, "HERMES_HOME": str(tmp_path)},
++        capture_output=True, text=True, timeout=60,
++    )
++    assert result.returncode == 0, result.stdout + result.stderr
++
++
++@pytest.mark.parametrize("consumer", [
++    "hermes_cli.config",
++    "hermes_cli.gateway",
++    "hermes_cli.auth",
++    "hermes_cli.auth_oauth_grants",
++    "hermes_cli.cli_info_mixin",
++    "hermes_cli.model_switch",
++    "agent.prompt_builder",
++    "gateway.run_profile_reconcile",
++    "model_tools",
++    "tui_gateway.server",
++])
++def test_fresh_consumers_accept_legacy_cached_utils(consumer, tmp_path):
++    _run(f"""
++import importlib
++import sys
++importlib.import_module({consumer!r})
++assert sys.modules['utils'] is legacy_utils
++assert not hasattr(legacy_utils, 'file_signature')
++""", tmp_path)
++
++
++def test_pending_receipt_survives_fresh_config_with_legacy_utils(tmp_path):
++    _run("""
++import json
++import sys
++from hermes_cli import update_receipt
++update_receipt.begin_update_receipt()
++receipt = update_receipt._current
++assert receipt is not None
++update_receipt.record_step('before-code-swap', True)
++# Receipt finalization lazily imports fresh config to resolve its output dir.
++# On the broken candidate this silently returns None and consumes _current.
++path = update_receipt.finalize_pending_update_receipt(1, 'restart failed')
++assert path is not None, 'the pending failure receipt was silently lost'
++body = json.loads(path.read_text())
++assert body['outcome'] == 'failed'
++assert body['exit_code'] == 1
++assert body['steps'][0]['name'] == 'before-code-swap'
++assert json.loads((path.parent / 'latest.json').read_text()) == body
++assert update_receipt.finalize_pending_update_receipt(1) is None
++assert sys.modules['utils'] is legacy_utils
++""", tmp_path)
+diff --git a/tui_gateway/server.py b/tui_gateway/server.py
+index 7f37b0f13a..a5b35d458c 100644
+--- a/tui_gateway/server.py
++++ b/tui_gateway/server.py
+@@ -26,7 +26,8 @@ from hermes_constants import (
+     get_hermes_home, get_hermes_home_override, profile_name_for_home,
+     reset_hermes_home_override, set_hermes_home_override)
+ from hermes_cli.env_loader import load_hermes_dotenv
+-from utils import file_signature, is_truthy_value
++from utils import is_truthy_value
++from file_signature import file_signature
+ from hermes_state_ids import new_session_id
+ from tools.environments.local import hermes_subprocess_env
+ from agent.replay_cleanup import canonicalize_replay_history
+diff --git a/utils.py b/utils.py
+index 5d14cfacec..6de0be3312 100644
+--- a/utils.py
++++ b/utils.py
+@@ -35,18 +35,6 @@ def env_var_enabled(name: str, default: str = "") -> bool:
+     return is_truthy_value(os.getenv(name, default), default=False)
+ 
+ 
+-def file_signature(st: os.stat_result) -> "tuple[int, int, int, int]":
+-    """Change-detection key for a stat result: ``(st_mtime_ns, st_size, st_ino, st_ctime_ns)``.
+-
+-    mtime + size alone miss a replacement that preserves both (``cp -p``, ``rsync -t``, a tar
+-    restore, a script pinning the timestamp with ``os.utime``). The inode changes on an atomic
+-    replace and ctime cannot be backdated from user space, so the pair catches those writers.
+-    On Windows ``st_ino`` may be 0 and ``st_ctime_ns`` is the creation time — both stable across
+-    an in-place rewrite, so the key degrades to mtime + size there rather than misfiring.
+-    """
+-    return (st.st_mtime_ns, st.st_size, st.st_ino, st.st_ctime_ns)
+-
+-
+ def _preserve_file_mode(path: Path) -> "int | None":
+     """Permission bits of *path* if it exists, else ``None``."""
+     try:

@@ -24,7 +24,7 @@ class HourlyBuildTests(unittest.TestCase):
         segment = workflow.split(marker, 1)[1].split('      - name:', 1)[0]
         return textwrap.dedent(segment.split('        run: |\n', 1)[1])
 
-    def build(self, changed, missing_metadata=False, verify_consumer=False):
+    def build(self, changed, missing_metadata=False, verify_consumer=False, legacy_fix=False, drift=False):
         shell = self.shell('Build isolated candidate without credentials')
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
@@ -43,6 +43,11 @@ class HourlyBuildTests(unittest.TestCase):
             helper = source / 'scripts/bridge/lock_metadata.py'
             helper.parent.mkdir(parents=True)
             shutil.copyfile(ROOT / 'scripts/bridge/lock_metadata.py', helper)
+            legacy_patch = source / 'scripts/bridge/patches/legacy-file-signature.patch'
+            legacy_patch.parent.mkdir()
+            legacy_patch.write_text('diff --git a/fixture.txt b/fixture.txt\n'
+                                    '--- a/fixture.txt\n+++ b/fixture.txt\n'
+                                    '@@ -1 +1 @@\n-synthetic update\n+legacy safe\n')
             (source / 'pyproject.toml').write_text(PROJECT.replace('new_package = false\n', ''))
             (source / 'uv.lock').write_text(LOCK)
             git('add', '.')
@@ -50,6 +55,10 @@ class HourlyBuildTests(unittest.TestCase):
             base = git('rev-parse', 'HEAD')
             if changed:
                 (source / 'fixture.txt').write_text('synthetic update\n')
+                if drift:
+                    (source / 'fixture.txt').write_text('upstream drift\n')
+                if legacy_fix:
+                    legacy_patch.write_text('Incoming patch must not be used\n')
                 if missing_metadata:
                     (source / 'pyproject.toml').write_text(PROJECT)
                     helper.write_text('raise SystemExit("Incoming helper must never execute")\n')
@@ -78,6 +87,24 @@ class HourlyBuildTests(unittest.TestCase):
             else:
                 candidate = work / 'candidate'
                 before = git('rev-parse', 'HEAD', repo=candidate)
+                if legacy_fix:
+                    if drift:
+                        result = subprocess.run(['bash', '-e', '-u', '-o', 'pipefail'],
+                                                input=self.shell('Apply legacy updater import compatibility fix'),
+                                                text=True, cwd=work, env=env, capture_output=True, timeout=30)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(git('rev-parse', 'HEAD', repo=candidate), before)
+                        self.assertEqual(git('status', '--porcelain', repo=candidate), '')
+                        self.assertFalse((work / 'evidence/receipt.json').exists())
+                        return
+                    run(self.shell('Apply legacy updater import compatibility fix'))
+                    fixed = git('rev-parse', 'HEAD', repo=candidate)
+                    self.assertEqual((candidate / 'fixture.txt').read_text(), 'legacy safe\n')
+                    self.assertNotEqual(fixed, before)
+                    self.assertEqual(git('show', '-s', '--format=%P', 'HEAD', repo=candidate), before)
+                    self.assertEqual(git('diff', '--name-only', before, fixed, repo=candidate), 'fixture.txt')
+                    self.assertEqual(git('diff', '--exit-code', 'HEAD', repo=candidate), '')
+                    before = fixed
                 run(self.shell('Reconcile missing lock exclusion metadata'))
                 after = git('rev-parse', 'HEAD', repo=candidate)
                 if missing_metadata:
@@ -179,6 +206,12 @@ class HourlyBuildTests(unittest.TestCase):
 
     def test_change_keeps_candidate_path(self):
         self.build(True)
+
+    def test_legacy_fix_uses_frozen_base_patch_and_binds_final_candidate(self):
+        self.build(True, missing_metadata=True, legacy_fix=True)
+
+    def test_legacy_fix_drift_fails_without_partial_changes_or_receipt(self):
+        self.build(True, legacy_fix=True, drift=True)
 
     def test_reconciliation_uses_base_helper_and_binds_committed_receipt(self):
         self.build(True, missing_metadata=True)
