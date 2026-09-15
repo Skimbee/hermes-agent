@@ -3,8 +3,12 @@ import time
 import re
 
 def failure_evidence(data):
+    if not isinstance(data, dict):
+        data = {}
     result = {k: data[k] for k in ("receipt_exists", "receipt_finished", "receipt_read_error", "log_read_error") if type(data.get(k)) is bool}
     counts = data.get("process_counts", {})
+    if not isinstance(counts, dict):
+        counts = {}
     result["process_counts"] = {k: v for k, v in counts.items() if k in ("python", "python3", "python3.11", "git", "npm", "node", "uv") and type(v) is int and 0 <= v <= 10000}
     text = str(data.get("log_tail", ""))[-12000:]
     text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)

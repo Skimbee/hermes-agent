@@ -117,7 +117,12 @@ def main():
                 probe=(ROOT/'scripts/bridge/container-e2e/failure_probe.py').read_text()
                 raw=OUT/'update-untrusted.log'
                 logged(['docker','exec',NAME,'python3','-I','-c',probe],raw,15)
-                data=json.loads(raw.read_text(errors='replace'))
+                text=raw.read_text(encoding='utf-8',errors='replace')
+                try:
+                    data=json.loads(text.strip().split('\n')[-1])
+                    if not isinstance(data,dict):data={}
+                except (ValueError,IndexError):
+                    data={'log_tail':text}
                 result['update_log']=log_summary(str(data.get('log_tail', '')))
                 result['failure_evidence']=failure_evidence(data)
             except Exception:

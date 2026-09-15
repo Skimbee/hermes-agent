@@ -13,7 +13,7 @@ try:
     else:
         result['receipt_read_error'] = True
 except (OSError, ValueError, AttributeError):
-    result['receipt_read_error'] = True
+    result['receipt_read_error'] = result['receipt_exists']
 try:
     with (home / 'logs/update.log').open('rb') as stream:
         stream.seek(0, 2)
@@ -26,7 +26,7 @@ counts = {}
 for entry in Path('/proc').iterdir():
     if entry.name.isdigit():
         try:
-            name = (entry / 'comm').read_text().strip()
+            name = (entry / 'comm').read_text(errors='replace').strip()
             if name in ('python', 'python3', 'python3.11', 'git', 'npm', 'node', 'uv'):
                 counts[name] = counts.get(name, 0) + 1
         except OSError:
