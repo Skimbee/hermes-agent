@@ -1,6 +1,7 @@
 """External controller for actual Dashboard update in unprivileged container."""
 import json,os,pathlib,subprocess,time,urllib.request,threading
 from playwright.sync_api import sync_playwright
+from update_diagnostics import poll_receipt, log_summary
 ROOT=pathlib.Path.cwd(); OUT=ROOT/'evidence';OUT.mkdir(exist_ok=True)
 META=json.loads((ROOT/'e2e-input/binding.json').read_text())
 NAME='bridge-e2e-'+os.environ['GITHUB_RUN_ID'];VOL=NAME+'-data';NET=NAME+'-net';IMAGE='bridge-e2e-toolchain:local'
@@ -93,15 +94,11 @@ def main():
             with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith('/api/hermes/update'),timeout=60000) as response:
                 page.get_by_role('button',name='Update now',exact=True).last.click()
             assert response.value.ok;result['post_accepted']=True
-            deadline=time.monotonic()+1800;receipt=None
-            while time.monotonic()<deadline:
-                try:
-                    page.goto(url,wait_until='domcontentloaded',timeout=10000)
-                    data=page.evaluate("""async()=>{const r=await fetch('/api/hermes/update/receipt',{headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__}});if(!r.ok)return null;const t=await r.text();if(t.length>131072)throw Error('receipt size');return JSON.parse(t)}""")
-                    summary=(data or {}).get('summary') or {}
-                    if summary.get('finished_at'):receipt=summary;break
-                except Exception:pass
-                time.sleep(5)
+            result['polling']={}
+            def fetch_receipt():
+                page.goto(url,wait_until='domcontentloaded',timeout=10000)
+                return page.evaluate("""async()=>{const r=await fetch('/api/hermes/update/receipt',{headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__},signal:AbortSignal.timeout(10000)});if(!r.ok)return {status:r.status};const t=await r.text();if(t.length>131072)throw Error('receipt size');return {status:r.status,data:JSON.parse(t)}}""")
+            receipt=poll_receipt(fetch_receipt,result['polling'])
             assert receipt is not None,'No final receipt'
             result['observed_receipt']={k:receipt.get(k) for k in ('pre_sha','post_sha','outcome')}
             assert receipt['pre_sha']==META['pre_head'] and receipt['post_sha']==META['candidate'] and receipt['outcome']=='success'
@@ -115,6 +112,15 @@ def main():
         inspection=capture(['docker','run','--rm','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--user','10001:10001','--pids-limit=32','--memory=256m','--mount','type=volume,source='+VOL+',target=/snapshot,readonly','--interactive',IMAGE,'python3','-I','-c',(ROOT/'scripts/bridge/container-e2e/inspect_snapshot.py').read_text()],input=payload,timeout=180)
         result.update(json.loads(inspection));result['passed']=True
     finally:
+        if started and result.get('post_accepted') and not result['passed']:
+            try:
+                # Fixed fixture path; project only stage labels, never upload raw text.
+                probe="import os; p='/work/home/.hermes/logs/update.log'; f=open(p,'rb'); f.seek(max(0,os.fstat(f.fileno()).st_size-16000)); print(f.read(16000).decode('utf-8','replace'))"
+                raw=OUT/'update-untrusted.log'
+                logged(['docker','exec',NAME,'python3','-I','-c',probe],raw,15)
+                result['update_log']=log_summary(raw.read_text(errors='replace'))
+            except Exception:
+                result['update_log']={'collection_failed':True,'raw_log_omitted':True}
         if started:subprocess.run(['docker','stop','--time','10',NAME],timeout=30,capture_output=True)
         logs=subprocess.run(['docker','logs','--tail','80',NAME],capture_output=True,text=True,timeout=15)
         import re
