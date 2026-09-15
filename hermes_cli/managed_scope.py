@@ -17,7 +17,7 @@ from typing import Dict, Optional
 
 import yaml
 
-from utils import file_signature
+from file_signature import file_signature
 
 logger = logging.getLogger(__name__)
 

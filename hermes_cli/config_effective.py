@@ -25,7 +25,7 @@ from utils import fast_safe_load
 # path -> raw user mapping from the last successful parse in this process; served (through the
 # normal pipeline) when the file is later found mid-edit as broken YAML.
 _LAST_GOOD_USER_RAW: Dict[str, Dict[str, Any]] = {}
-# path -> (*user_signature, *managed_signature, effective, env_snapshot); see utils.file_signature.
+# path -> (*user_signature, *managed_signature, effective, env_snapshot); see file_signature.file_signature.
 _EFFECTIVE_CACHE: Dict[str, Tuple[Any, ...]] = {}
 
 

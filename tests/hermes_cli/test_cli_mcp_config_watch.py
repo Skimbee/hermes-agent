@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from utils import file_signature
+from file_signature import file_signature
 
 
 def _make_cli(tmp_path, mcp_servers=None, extra_config=None):
