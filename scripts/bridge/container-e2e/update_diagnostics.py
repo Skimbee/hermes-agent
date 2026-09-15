@@ -8,6 +8,7 @@ def poll_receipt(fetch, diagnostic, timeout=1800, clock=time.monotonic, sleep=ti
     diagnostic.update(attempts=0, timed_out=False)
     while clock() < deadline:
         diagnostic['attempts'] += 1
+        diagnostic.update(last_error=None, last_http_status=None, summary_present=False)
         try:
             response = fetch()
             status = response.get('status')
@@ -33,10 +34,10 @@ def poll_receipt(fetch, diagnostic, timeout=1800, clock=time.monotonic, sleep=ti
 
 def log_summary(text):
     """Export only fixed stage/error labels, never untrusted log text."""
-    labels = ('snapshot', 'fetch', 'dependencies', 'build', 'restart', 'receipt', 'error', 'failed', 'timeout')
-    signals = []
+    labels = ('snapshot', 'fetch', 'dependencies', 'build', 'restart', 'receipt', 'error', 'failed', 'timeout', 'fatal', 'npm err!', 'traceback', 'killed', 'oom', 'exit code', 'no space left', 'permission denied')
+    signals = set()
     for line in text[-16000:].splitlines():
         for label in labels:
             if label in line.lower():
-                signals.append(label)
-    return {'tail_chars': min(len(text), 16000), 'signals': signals[-40:], 'raw_log_omitted': True}
+                signals.add(label)
+    return {'tail_chars': min(len(text), 16000), 'signals': sorted(signals), 'raw_log_omitted': True}

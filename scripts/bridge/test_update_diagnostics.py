@@ -21,7 +21,7 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(receipt['finished_at'], 'done')
         self.assertEqual(diagnostic['attempts'], 3)
         self.assertEqual(diagnostic['last_http_status'], 200)
-        self.assertEqual(diagnostic['last_error'], 'http_error')
+        self.assertIsNone(diagnostic['last_error'])
         self.assertNotIn('secret-value', str(diagnostic))
 
     def test_timeout_and_log_projection_are_bounded(self):
@@ -32,4 +32,9 @@ class DiagnosticsTests(unittest.TestCase):
         output = m.log_summary('secret=private\nInstalling dependencies\nERROR password=hunter2\nbuild complete\n')
         self.assertNotIn('private', str(output))
         self.assertNotIn('hunter2', str(output))
-        self.assertEqual(output['signals'], ['dependencies', 'error', 'build'])
+        self.assertEqual(output['signals'], ['build', 'dependencies', 'error'])
+        signals = m.log_summary('fatal: failure\nnpm ERR!\nTraceback\n' + 'build\n' * 100)['signals']
+        self.assertIn('fatal', signals)
+        self.assertIn('npm err!', signals)
+        self.assertIn('traceback', signals)
+        self.assertEqual(signals.count('build'), 1)
