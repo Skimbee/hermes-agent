@@ -24,7 +24,7 @@ def failure_evidence(data):
 
 
 
-def poll_receipt(fetch, diagnostic, timeout=1800, clock=time.monotonic, sleep=time.sleep):
+def poll_receipt(fetch, diagnostic, timeout=900, clock=time.monotonic, sleep=time.sleep):
     start = clock()
     deadline = start + timeout
     diagnostic.update(attempts=0, timed_out=False)
