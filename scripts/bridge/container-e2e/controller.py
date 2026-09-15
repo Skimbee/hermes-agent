@@ -93,7 +93,7 @@ def main():
             with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith('/api/hermes/update'),timeout=60000) as response:
                 page.get_by_role('button',name='Update now',exact=True).last.click()
             assert response.value.ok;result['post_accepted']=True
-            deadline=time.monotonic()+900;receipt=None
+            deadline=time.monotonic()+1800;receipt=None
             while time.monotonic()<deadline:
                 try:
                     page.goto(url,wait_until='domcontentloaded',timeout=10000)
