@@ -416,7 +416,7 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- System state: OS, CPU, memory, disk, ports, processes → use terminal\n"
     "- File contents, sizes, line counts → use read_file, search_files, or terminal\n"
     "- Git history, branches, diffs → use terminal\n"
-    "- Current facts (weather, news, versions) → use web_search\n"
+    "- Current facts (weather, news, versions) → use an appropriate permitted retrieval/search tool\n"
     "Your memory and user profile describe the USER, not the system you are running on. The execution environment may "
     "differ from what the user profile says about their personal setup.\n"
     "</mandatory_tool_use>\n\n"
@@ -458,24 +458,21 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "</literal_preservation>\n\n"
     "<missing_context>\n"
     "- If required context is missing, do NOT guess or hallucinate an answer.\n"
-    "- Use the appropriate lookup tool when missing information is retrievable (search_files, web_search, read_file, "
-    "etc.).\n"
+    "- Use the appropriate permitted lookup tool when missing information is retrievable (search_files, read_file, "
+    "or an available retrieval/search tool).\n"
     "- Ask a clarifying question only when the information cannot be retrieved by tools.\n"
     "- If you must proceed with incomplete information, label assumptions explicitly.\n"
     "</missing_context>"
 )
 
 
-def execution_guidance_text(valid_tool_names=None) -> str:
-    """OPENAI_MODEL_EXECUTION_GUIDANCE for the session's toolset (cache-safe: the toolset is fixed per session).
+def execution_guidance_text() -> str:
+    """OPENAI_MODEL_EXECUTION_GUIDANCE as injected into the system prompt.
 
-    Without web tools (e.g. Blank Slate) the ``web_search`` mentions would dangle, so they are dropped/adjusted.
+    The guidance names no web tool (#39797: a hard "use web_search" overrode SOUL.md and dangled in Blank Slate),
+    so the text is toolset-neutral and needs no per-session filtering.
     """
-    text = OPENAI_MODEL_EXECUTION_GUIDANCE
-    if valid_tool_names is not None and "web_search" not in valid_tool_names:
-        text = text.replace("- Current facts (weather, news, versions) → use web_search\n", "")
-        text = text.replace("(search_files, web_search, read_file, etc.)", "(search_files, read_file, etc.)")
-    return text
+    return OPENAI_MODEL_EXECUTION_GUIDANCE
 
 
 # Gemini/Gemma-specific operational guidance, adapted from OpenCode's gemini.txt.
