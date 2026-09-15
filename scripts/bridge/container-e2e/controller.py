@@ -1,7 +1,7 @@
 """External controller for actual Dashboard update in unprivileged container."""
 import json,os,pathlib,subprocess,time,urllib.request,threading
 from playwright.sync_api import sync_playwright
-from update_diagnostics import poll_receipt, log_summary
+from update_diagnostics import poll_receipt, log_summary, failure_evidence
 ROOT=pathlib.Path.cwd(); OUT=ROOT/'evidence';OUT.mkdir(exist_ok=True)
 META=json.loads((ROOT/'e2e-input/binding.json').read_text())
 NAME='bridge-e2e-'+os.environ['GITHUB_RUN_ID'];VOL=NAME+'-data';NET=NAME+'-net';IMAGE='bridge-e2e-toolchain:local'
@@ -114,11 +114,12 @@ def main():
     finally:
         if started and result.get('post_accepted') and not result['passed']:
             try:
-                # Fixed fixture path; project only stage labels, never upload raw text.
-                probe="import os; p='/work/home/.hermes/logs/update.log'; f=open(p,'rb'); f.seek(max(0,os.fstat(f.fileno()).st_size-16000)); print(f.read(16000).decode('utf-8','replace'))"
+                probe=(ROOT/'scripts/bridge/container-e2e/failure_probe.py').read_text()
                 raw=OUT/'update-untrusted.log'
                 logged(['docker','exec',NAME,'python3','-I','-c',probe],raw,15)
-                result['update_log']=log_summary(raw.read_text(errors='replace'))
+                data=json.loads(raw.read_text(errors='replace'))
+                result['update_log']=log_summary(str(data.get('log_tail', '')))
+                result['failure_evidence']=failure_evidence(data)
             except Exception:
                 result['update_log']={'collection_failed':True,'raw_log_omitted':True}
         if started:subprocess.run(['docker','stop','--time','10',NAME],timeout=30,capture_output=True)

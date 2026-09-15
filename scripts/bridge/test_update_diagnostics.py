@@ -8,6 +8,15 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_failure_evidence_redacts_and_bounds(self):
+        output = m.failure_evidence({'receipt_exists': True, 'process_counts': {'node': 2, 'secret': 3}, 'log_tail': 'password=hunter2\nhttps://user:pass@example.com\n' + 'x'*40 + '\nERROR dependency failed'})
+        self.assertTrue(output['receipt_exists'])
+        self.assertEqual(output['process_counts'], {'node': 2})
+        for secret in ('hunter2', 'user:pass', 'x'*40):
+            self.assertNotIn(secret, str(output))
+        self.assertIn('ERROR dependency failed', output['sanitized_log_tail'])
+        self.assertLessEqual(len(m.failure_evidence({'log_tail': 'error '*10000})['sanitized_log_tail']), 8000)
+
     def test_poll_failure_then_success_keeps_safe_evidence(self):
         ticks = iter(range(100))
         calls = iter([TimeoutError('secret-value'), {'status': 503}, {'status': 200, 'data': {'summary': {'finished_at': 'done'}}}])
