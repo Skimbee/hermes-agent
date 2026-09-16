@@ -79,6 +79,22 @@ class LockMetadataTests(unittest.TestCase):
             self.assertIs(parsed['options']['exclude-newer-package']['existing'], False)
             self.assertIs(parsed['options']['exclude-newer-package']['new-package'], False)
 
+    def test_indented_array_table_ends_exclusion_scan_and_refuses_other_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            project = root / 'pyproject.toml'
+            lock = root / 'uv.lock'
+            project.write_text(PROJECT.replace('new_package = false\n', ''))
+            malformed = LOCK.replace('[[package]]\n', '  [[package]]\n', 1).replace(
+                'source = { registry = "https://example.invalid/simple" }\n',
+                'editable = false\neditable = false\nsource = { registry = "https://example.invalid/simple" }\n', 1)
+            lock.write_text(malformed)
+            before = lock.read_bytes()
+            result = self.invoke(root)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn('LOCK_METADATA_REFUSED:', result.stderr)
+            self.assertEqual(lock.read_bytes(), before)
+
     def test_unsupported_or_ambiguous_inputs_fail_without_any_write(self):
         cases = {
             'new_non_false_option': (PROJECT.replace('new_package = false', 'new_package = true'), LOCK),

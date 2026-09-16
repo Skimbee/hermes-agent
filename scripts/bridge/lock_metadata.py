@@ -13,6 +13,9 @@ import tomllib
 
 HEADER = b'[options.exclude-newer-package]\n'
 LIMIT = 5 * 1024 * 1024
+EXCLUSION_HEADER = re.compile(
+    rb'\s*\[options\.exclude-newer-package\]\s*(?:#.*)?(?:\r?\n)?$')
+TABLE_HEADER = re.compile(rb'\s*\[\[?')
 FALSE_EXCLUSION = re.compile(
     rb'(?P<key>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*=\s*false\s*(?:#.*)?(?:\r?\n)?$'
 )
@@ -56,9 +59,9 @@ def remove_exact_duplicate_false_exclusions(raw):
     result, seen = [], set()
     in_exclusions = False
     for line in raw.splitlines(keepends=True):
-        if line == HEADER:
+        if EXCLUSION_HEADER.fullmatch(line):
             in_exclusions = True
-        elif in_exclusions and line.startswith(b'['):
+        elif in_exclusions and TABLE_HEADER.match(line):
             in_exclusions = False
         match = FALSE_EXCLUSION.fullmatch(line) if in_exclusions else None
         if match is not None:
