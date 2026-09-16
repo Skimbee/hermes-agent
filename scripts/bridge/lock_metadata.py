@@ -13,6 +13,12 @@ import tomllib
 
 HEADER = b'[options.exclude-newer-package]\n'
 LIMIT = 5 * 1024 * 1024
+EXCLUSION_HEADER = re.compile(
+    rb'\s*\[options\.exclude-newer-package\]\s*(?:#.*)?(?:\r?\n)?$')
+TABLE_HEADER = re.compile(rb'\s*\[\[?')
+FALSE_EXCLUSION = re.compile(
+    rb'(?P<key>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)\s*=\s*false\s*(?:#.*)?(?:\r?\n)?$'
+)
 
 
 def normalize(name):
@@ -43,13 +49,38 @@ def read_regular(path):
         return raw, info
 
 
+def remove_exact_duplicate_false_exclusions(raw):
+    """Remove only repeated literal ``name = false`` entries in the lock table.
+
+    Git's line-oriented merge may duplicate an independently-added exclusion.
+    This is the sole malformed-TOML repair allowed here; every other syntax or
+    semantic error still reaches tomllib and is refused.
+    """
+    result, seen = [], set()
+    in_exclusions = False
+    for line in raw.splitlines(keepends=True):
+        if EXCLUSION_HEADER.fullmatch(line):
+            in_exclusions = True
+        elif in_exclusions and TABLE_HEADER.match(line):
+            in_exclusions = False
+        match = FALSE_EXCLUSION.fullmatch(line) if in_exclusions else None
+        if match is not None:
+            key = match.group('key')
+            if key in seen:
+                continue
+            seen.add(key)
+        result.append(line)
+    return b''.join(result)
+
+
 def reconcile(root):
     root = pathlib.Path(root)
     project_path, lock_path = root / 'pyproject.toml', root / 'uv.lock'
     project_raw, _ = read_regular(project_path)
     original, info = read_regular(lock_path)
+    repaired = remove_exact_duplicate_false_exclusions(original)
     project = tomllib.loads(project_raw.decode('utf-8'))
-    lock = tomllib.loads(original.decode('utf-8'))
+    lock = tomllib.loads(repaired.decode('utf-8'))
     if type(lock.get('version')) is not int or lock['version'] != 1 or type(lock.get('revision')) is not int or lock['revision'] != 3:
         raise ValueError('Unsupported lock schema; manual review required')
     declared = option_map(project['tool']['uv']['exclude-newer-package'])
@@ -62,18 +93,19 @@ def reconcile(root):
     for name in missing:
         if declared[name] is not False or name not in packages:
             raise ValueError('Only explicit false exclusions for already locked packages may be added: ' + name)
-    updated = original
+    updated = repaired
     if missing:
-        if original.count(HEADER) != 1:
+        if repaired.count(HEADER) != 1:
             raise ValueError('Unsupported lock table representation')
         lines = ''.join(f'{name} = false\n' for name in missing).encode()
-        updated = original.replace(HEADER, HEADER + lines, 1)
+        updated = repaired.replace(HEADER, HEADER + lines, 1)
         after = tomllib.loads(updated.decode('utf-8'))
         for name in missing:
             if after['options']['exclude-newer-package'].pop(name) is not False:
                 raise ValueError('Unexpected reconciliation value')
         if after != lock:
             raise ValueError('Reconciliation changed data outside added exclusions')
+    if updated != original:
         # No untrusted process runs during this preparation step. Re-read before
         # atomic replacement to reject accidental input changes, not follow links.
         if read_regular(project_path)[0] != project_raw or read_regular(lock_path)[0] != original:

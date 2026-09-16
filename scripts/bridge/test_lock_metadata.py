@@ -60,6 +60,41 @@ class LockMetadataTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)['added_exclusions'], [])
             self.assertEqual(lock.read_bytes(), repaired)
 
+    def test_exact_duplicate_false_exclusion_is_removed_without_relaxing_other_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            project = root / 'pyproject.toml'
+            lock = root / 'uv.lock'
+            project.write_text(PROJECT)
+            duplicated = LOCK.replace('existing = false\n', 'existing = false\nexisting = false\n', 1)
+            lock.write_text(duplicated)
+            result = self.invoke(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['added_exclusions'], ['new-package'])
+            repaired = lock.read_text()
+            expected = LOCK.replace('[options.exclude-newer-package]\n',
+                                    '[options.exclude-newer-package]\nnew-package = false\n')
+            self.assertEqual(repaired, expected)
+            parsed = tomllib.loads(repaired)
+            self.assertIs(parsed['options']['exclude-newer-package']['existing'], False)
+            self.assertIs(parsed['options']['exclude-newer-package']['new-package'], False)
+
+    def test_indented_array_table_ends_exclusion_scan_and_refuses_other_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            project = root / 'pyproject.toml'
+            lock = root / 'uv.lock'
+            project.write_text(PROJECT.replace('new_package = false\n', ''))
+            malformed = LOCK.replace('[[package]]\n', '  [[package]]\n', 1).replace(
+                'source = { registry = "https://example.invalid/simple" }\n',
+                'editable = false\neditable = false\nsource = { registry = "https://example.invalid/simple" }\n', 1)
+            lock.write_text(malformed)
+            before = lock.read_bytes()
+            result = self.invoke(root)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertIn('LOCK_METADATA_REFUSED:', result.stderr)
+            self.assertEqual(lock.read_bytes(), before)
+
     def test_unsupported_or_ambiguous_inputs_fail_without_any_write(self):
         cases = {
             'new_non_false_option': (PROJECT.replace('new_package = false', 'new_package = true'), LOCK),
@@ -67,6 +102,8 @@ class LockMetadataTests(unittest.TestCase):
             'removed_exclusion': (PROJECT.replace('existing = false\n', ''), LOCK),
             'package_not_locked': (PROJECT, LOCK.replace('name = "new-package"', 'name = "other-package"')),
             'ambiguous_name_aliases': (PROJECT + 'new-package = false\n', LOCK),
+            'duplicate_non_false_exclusion': (PROJECT, LOCK.replace(
+                'existing = false', 'existing = false\nexisting = true')),
             'future_lock_schema': (PROJECT, LOCK.replace('revision = 3', 'revision = 4')),
             'project_symlink': (PROJECT, LOCK),
             'lock_symlink': (PROJECT, LOCK),
