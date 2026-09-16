@@ -81,9 +81,15 @@ jobs:
           cd candidate
           # Regression-verified production fix d44af15402957b31c13574a73de35741b825e579.
           # Fail closed on upstream drift; never alter the installed old base.
-          git apply --check --index ../legacy-file-signature.patch
-          git apply --index ../legacy-file-signature.patch
-          git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m 'fix: decouple file signatures from legacy updater utils cache'
+          if git apply --check --index ../legacy-file-signature.patch; then
+            git apply --index ../legacy-file-signature.patch
+            git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -m 'fix: decouple file signatures from legacy updater utils cache'
+          elif git apply --reverse --check --index ../legacy-file-signature.patch; then
+            printf 'Legacy updater import compatibility fix already present.\n'
+          else
+            printf 'Legacy updater import compatibility patch neither applies nor exactly reverses; refusing upstream drift.\n' >&2
+            exit 1
+          fi
       - name: Reconcile missing lock exclusion metadata
         if: steps.build.outputs.has_candidate != 'false'
         shell: bash
