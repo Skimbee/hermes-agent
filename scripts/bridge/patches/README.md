@@ -13,9 +13,11 @@ the existing stat-signature implementation unchanged into a dependency-free
 module and changes its consumers. It includes the legacy cached-utils import
 and receipt-persistence regressions, which run in the hourly gate.
 
-Patch drift fails closed: do not ignore failures, automatically reverse the
-patch, or alter the installed old base. If upstream adopts or changes this fix,
-review and remove/update the patch and assembly step together.
+Patch drift fails closed: the candidate must either accept this exact patch or
+already contain its exact inverse. The workflow never ignores a patch failure,
+automatically reverses the patch, or alters the installed old base. If upstream
+changes this fix rather than retaining its exact result, the candidate is
+rejected for review.
 
 The Dashboard client base remains
 `d131988d53c3b8389801f6cee03b990bd51ac49a`, with no bootstrap or monkey-patch.

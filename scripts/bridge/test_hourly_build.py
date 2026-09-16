@@ -24,7 +24,8 @@ class HourlyBuildTests(unittest.TestCase):
         segment = workflow.split(marker, 1)[1].split('      - name:', 1)[0]
         return textwrap.dedent(segment.split('        run: |\n', 1)[1])
 
-    def build(self, changed, missing_metadata=False, verify_consumer=False, legacy_fix=False, drift=False):
+    def build(self, changed, missing_metadata=False, verify_consumer=False, legacy_fix=False,
+              legacy_fix_already_applied=False, drift=False):
         shell = self.shell('Build isolated candidate without credentials')
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
@@ -55,6 +56,8 @@ class HourlyBuildTests(unittest.TestCase):
             base = git('rev-parse', 'HEAD')
             if changed:
                 (source / 'fixture.txt').write_text('synthetic update\n')
+                if legacy_fix_already_applied:
+                    (source / 'fixture.txt').write_text('legacy safe\n')
                 if drift:
                     (source / 'fixture.txt').write_text('upstream drift\n')
                 if legacy_fix:
@@ -100,9 +103,12 @@ class HourlyBuildTests(unittest.TestCase):
                     run(self.shell('Apply legacy updater import compatibility fix'))
                     fixed = git('rev-parse', 'HEAD', repo=candidate)
                     self.assertEqual((candidate / 'fixture.txt').read_text(), 'legacy safe\n')
-                    self.assertNotEqual(fixed, before)
-                    self.assertEqual(git('show', '-s', '--format=%P', 'HEAD', repo=candidate), before)
-                    self.assertEqual(git('diff', '--name-only', before, fixed, repo=candidate), 'fixture.txt')
+                    if legacy_fix_already_applied:
+                        self.assertEqual(fixed, before)
+                    else:
+                        self.assertNotEqual(fixed, before)
+                        self.assertEqual(git('show', '-s', '--format=%P', 'HEAD', repo=candidate), before)
+                        self.assertEqual(git('diff', '--name-only', before, fixed, repo=candidate), 'fixture.txt')
                     self.assertEqual(git('diff', '--exit-code', 'HEAD', repo=candidate), '')
                     before = fixed
                 run(self.shell('Reconcile missing lock exclusion metadata'))
@@ -209,6 +215,9 @@ class HourlyBuildTests(unittest.TestCase):
 
     def test_legacy_fix_uses_frozen_base_patch_and_binds_final_candidate(self):
         self.build(True, missing_metadata=True, legacy_fix=True)
+
+    def test_legacy_fix_already_applied_is_accepted_without_a_second_commit(self):
+        self.build(True, legacy_fix=True, legacy_fix_already_applied=True)
 
     def test_legacy_fix_drift_fails_without_partial_changes_or_receipt(self):
         self.build(True, legacy_fix=True, drift=True)
